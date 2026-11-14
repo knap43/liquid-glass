@@ -582,7 +582,6 @@ export class Launcher {
     return Clutter.EVENT_STOP;
   }
 
-  // Scrolls to the item only when the keys moved to it; with the pointer, the rows would move under it.
   private _select(index: number, reveal = true): void {
     this._items[this._selected]?.actor.remove_style_pseudo_class('selected');
     this._selected = index;
@@ -738,12 +737,11 @@ export class Launcher {
     const list = this._list;
     if (!list) return;
     list.destroy_all_children();
-    this._items = this._results.map((result, i) => {
+    this._items = this._results.map(result => {
       const icon = this._resultIcon(result, ICON_SIZE);
       const activate = () => this._activateResult(result);
       const row = this._row(icon, result.meta.name ?? '', result.meta.description || result.provider?.appInfo?.get_name() || '',
         this._pinOf(result, icon), activate, () => { }, result.install ? 'Install' : '');
-      row.connect('notify::hover', () => { if (row.hover) this._select(i, false); });
       list.add_child(row);
       return { actor: row, activate };
     });
@@ -912,8 +910,6 @@ export class Launcher {
         stack.add_child(content);
         stack.add_child(toggle);
         button.set_child(stack);
-        const index = this._items.length;
-        button.connect('notify::hover', () => { if (button.hover) this._select(index, false); });
         line!.add_child(button);
         this._items.push({ actor: button, activate: () => this._activatePin(pin) });
       });
@@ -926,8 +922,6 @@ export class Launcher {
         const provider = this._providers().find(p => p.id === pin.provider);
         const row = this._row(this._pinIcon(pin, ICON_SIZE), pin.name,
           pin.description || provider?.appInfo?.get_name() || '', pin, () => this._activatePin(pin), refresh);
-        const index = this._items.length;
-        row.connect('notify::hover', () => { if (row.hover) this._select(index, false); });
         list.add_child(row);
         this._items.push({ actor: row, activate: () => this._activatePin(pin) });
       }
