@@ -261,6 +261,12 @@ export class Launcher {
             this._materialIds.push(this._settings.connect(`changed::launcher-${key}`, () => this._applySize()));
         entry.clutter_text.connect('text-changed', () => this._queueSearch());
         entry.clutter_text.connect('key-press-event', (_a, event) => this._onKey(event));
+        // With an input method (IBus) the key events go to it rather than to the field, and Enter comes back only as
+        // the field's activate, which is what the shell's own search listens to as well.
+        entry.clutter_text.connect('activate', () => {
+            if (this._view === 'search')
+                this._enter();
+        });
         this._grab = Main.pushModal(root, { actionMode: Shell.ActionMode.POPUP });
         global.stage.set_key_focus(entry.clutter_text);
         this._shapeStarted = false;

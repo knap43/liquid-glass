@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcherenter, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1730,6 +1730,67 @@ export default class LgDriver extends Extension {
     launcher._showResults = show;
     for (const [provider, ask] of wrapped) provider.getInitialResultSet = ask;
     launcher.close();
+  }
+
+  // Types a query and presses Enter with a virtual keyboard, Enter at once or after the results came, and reports
+  // what the launcher opened.
+  async _launcherEnterKeys() {
+    const launcher = (await this._lgModule('launcherManager.js')).Launcher.instance;
+    const activate = launcher._activateResult;
+    let opened = null;
+    launcher._activateResult = function (result) {
+      opened = result.meta.name;
+      this.close();
+    };
+    const keys = [];
+    const onKey = launcher._onKey;
+    launcher._onKey = function (event) {
+      keys.push(event.get_key_symbol());
+      return onKey.call(this, event);
+    };
+    const captured = global.stage.connect('captured-event', (_s, event) => {
+      if (event.type() === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Return) keys.push('stage-return');
+      return Clutter.EVENT_PROPAGATE;
+    });
+    const backend = global.stage.context.get_backend();
+    const keyboard = backend.get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    const press = async keyval => {
+      const t = GLib.get_monotonic_time();
+      keyboard.notify_keyval(t, keyval, Clutter.KeyState.PRESSED);
+      keyboard.notify_keyval(t + 20000, keyval, Clutter.KeyState.RELEASED);
+      await sleep(40);
+    };
+    for (const [query, wait] of [['settings', 0], ['settings', 1000], ['files', 0], ['files', 1000]]) {
+      launcher.open();
+      await sleep(1200);
+      opened = null;
+      for (const ch of query) await press(Clutter.unicode_to_keysym(ch.codePointAt(0)));
+      await sleep(wait);
+      const text = launcher._entry?.text;
+      const rows = launcher._items?.length;
+      await press(Clutter.KEY_Return);
+      await sleep(800);
+      log(`launcherenterkeys: "${query}" wait=${wait} text="${text}" rows=${rows} opened=${opened} ` +
+        `stillOpen=${!!launcher._root} focus=${global.stage.key_focus} ${opened !== null ? 'OK' : 'NG'}`);
+      if (launcher._root) launcher.close();
+      await sleep(800);
+    }
+    // The arrow keys and Escape go the same way.
+    launcher.open();
+    await sleep(1200);
+    for (const ch of 'files') await press(Clutter.unicode_to_keysym(ch.codePointAt(0)));
+    await sleep(1000);
+    await press(Clutter.KEY_Down);
+    await sleep(200);
+    const selected = launcher._selected;
+    await press(Clutter.KEY_Escape);
+    await sleep(800);
+    log(`launcherenterkeys: down selected=${selected} ${selected === 1 ? 'OK' : 'NG'}, escape closed=${!launcher._root} ` +
+      `${!launcher._root ? 'OK' : 'NG'}`);
+    if (launcher._root) launcher.close();
+    launcher._activateResult = activate;
+    launcher._onKey = onKey;
+    global.stage.disconnect(captured);
   }
 
   // Presses Enter at once after typing a query, and reports what the launcher opened.
@@ -4012,6 +4073,8 @@ export default class LgDriver extends Extension {
       await this._launcherTiming();
     if (parts.includes('launcherenter'))
       await this._launcherEnter();
+    if (parts.includes('launcherenterkeys'))
+      await this._launcherEnterKeys();
     if (parts.includes('launcherglass'))
       await this._launcherGlass(settings);
     if (parts.includes('clockcull'))
