@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1677,6 +1677,103 @@ export default class LgDriver extends Extension {
     }
     St.Settings.get().slow_down_factor = 1;
     settings.set_boolean('desktop-items-first-workspace-only', false);
+  }
+
+  // Types queries into the launcher a key at a time and reports how long each takes to show its results, and
+  // how long drawing them takes.
+  async _launcherTiming() {
+    const launcher = (await this._lgModule('launcherManager.js')).Launcher.instance;
+    const show = launcher._showResults;
+    let shown = [];
+    launcher._showResults = function () {
+      const t0 = GLib.get_monotonic_time();
+      show.call(this);
+      shown.push({at: t0, cost: GLib.get_monotonic_time() - t0, rows: this._results.length});
+    };
+    const times = [];
+    const wrapped = [];
+    for (const provider of launcher._providers()) {
+      const ask = provider.getInitialResultSet;
+      wrapped.push([provider, ask]);
+      provider.getInitialResultSet = async function (...args) {
+        const t0 = GLib.get_monotonic_time();
+        try {
+          return await ask.apply(this, args);
+        } finally {
+          times.push(`${this.id.replace(/^org\.gnome\.|\.desktop$/g, '')}:${Math.round((GLib.get_monotonic_time() - t0) / 1000)}`);
+        }
+      };
+    }
+    launcher.open();
+    await sleep(1500);
+    for (let round = 0; round < 3; round++) {
+      for (const query of ['settings', 'term', 'files', 'calc']) {
+        times.length = 0;
+        launcher._entry.text = '';
+        await sleep(800);
+        shown = [];
+        let last = 0;
+        for (let i = 1; i <= query.length; i++) {
+          launcher._entry.text = query.slice(0, i);
+          last = GLib.get_monotonic_time();
+          await sleep(90);
+        }
+        const waiting = [...launcher._waiting].join(',');
+        await sleep(1500);
+        const after = shown.filter(s => s.at >= last);
+        const first = after[0];
+        log(`launchertiming: round=${round} "${query}" first=${first ? Math.round((first.at - last) / 1000) : '-'}ms ` +
+          `rows=${after.map(s => s.rows).join(',')} draws=${after.map(s => Math.round(s.cost / 1000)).join(',')}ms ` +
+          `waited=[${waiting}] answered=${times.join(' ')}`);
+      }
+    }
+    launcher._showResults = show;
+    for (const [provider, ask] of wrapped) provider.getInitialResultSet = ask;
+    launcher.close();
+  }
+
+  // Opens the overview and the app grid and reports the clones of the items on the workspaces' wallpaper.
+  async _overviewItems(settings, m) {
+    new Gio.Settings({schema_id: 'org.gnome.mutter'}).set_boolean('dynamic-workspaces', false);
+    new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'}).set_int('num-workspaces', 3);
+    settings.set_string('desktop-item-positions', '{}');
+    settings.set_boolean('enable-glass-clock', true);
+    settings.set_strv('desktop-widgets', ['weather', 'events']);
+    settings.set_boolean('enable-desktop-widgets', true);
+    await sleep(4000);
+    const desktop = findActor(Main.layoutManager.uiGroup, 'liquid-glass-desktop');
+    const wm = global.workspace_manager;
+    const clones = () => findActors(Main.layoutManager.overviewGroup, a => a instanceof Clutter.Clone && a.source === desktop);
+    for (const [firstOnly, active] of [[false, 0], [true, 1]]) {
+      settings.set_boolean('desktop-items-first-workspace-only', firstOnly);
+      wm.get_workspace_by_index(active).activate(global.get_current_time());
+      await sleep(1500);
+      Main.overview.show();
+      await sleep(2500);
+      const shown = clones();
+      const boxes = shown.map(c => {
+        const [x, y] = c.get_transformed_position();
+        const [w, h] = c.get_transformed_size();
+        return `${Math.round(x)},${Math.round(y)} ${Math.round(w)}x${Math.round(h)}`;
+      });
+      const want = firstOnly ? 1 : 3;
+      log(`overviewitems: first-only=${firstOnly} active=${active} clones=${shown.length} [${boxes.join('; ')}] ` +
+        `visible=${desktop.visible} ${shown.length === want ? 'OK' : 'NG'}`);
+      await shot(`overview-items-${firstOnly ? 'first' : 'all'}`, [m.x, m.y, m.width, m.height]);
+      // A swipe that starts while the overview is open builds the workspaces anew.
+      Main.overview._overview._controls.prepareToEnterOverview();
+      await sleep(500);
+      log(`overviewitems: rebuilt clones=${clones().length} ${clones().length === want ? 'OK' : 'NG'}`);
+      Main.overview.showApps();
+      await sleep(2000);
+      await shot(`overview-items-${firstOnly ? 'first' : 'all'}-apps`, [m.x, m.y, m.width, m.height]);
+      Main.overview.hide();
+      await sleep(2000);
+      const want2 = !firstOnly || active === 0;
+      log(`overviewitems: after hide clones=${clones().length} visible=${desktop.visible} ${desktop.visible === want2 ? 'OK' : 'NG'}`);
+    }
+    settings.set_boolean('desktop-items-first-workspace-only', false);
+    wm.get_workspace_by_index(0).activate(global.get_current_time());
   }
 
   // Moves the weather card through its menu until its centre is a few px
@@ -3875,6 +3972,10 @@ export default class LgDriver extends Extension {
     }
     if (parts.includes('workspaces'))
       await this._workspaces(settings, m);
+    if (parts.includes('overviewitems'))
+      await this._overviewItems(settings, m);
+    if (parts.includes('launchertiming'))
+      await this._launcherTiming();
     if (parts.includes('launcherglass'))
       await this._launcherGlass(settings);
     if (parts.includes('clockcull'))

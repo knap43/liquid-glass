@@ -1,11 +1,14 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { MonitorGroup } from 'resource:///org/gnome/shell/ui/workspaceAnimation.js';
+import { Workspace } from 'resource:///org/gnome/shell/ui/workspace.js';
+import { WorkspacesView } from 'resource:///org/gnome/shell/ui/workspacesView.js';
 import { isActorValid } from '../actors.js';
 import { addBeforeRedraw, removeBeforeRedraw, startSyncLoop, stopStageLoop } from '../animation.js';
 import { MENU_ANIMATION, canCloneSource, resetHoverCursor, setHoverCursor } from '../shellVersion.js';
@@ -14,6 +17,28 @@ import { WeatherWidget, EventsWidget, MediaWidget } from './widgets.js';
 import { parseAnchors, parsePositions, placeAtFraction, fractionOf, sanitizeAnchor, stackAt, stackColumns, snapMove, keyEditRect, placeBeside, resizeRect } from './placement.js';
 import { GlassClock } from './clock.js';
 export const WIDGET_IDS = ['weather', 'events', 'media'];
+
+// Shrinks a clone of the items with the wallpaper it sits on, so that it keeps the part of the stage that is
+// the monitor's at the wallpaper's scale.
+const MonitorCloneLayout = GObject.registerClass(class MonitorCloneLayout extends Clutter.LayoutManager {
+    _monitor;
+
+    constructor(monitor) {
+        super();
+        this._monitor = monitor;
+    }
+
+    vfunc_allocate(container, box) {
+        const { x, y, width, height } = this._monitor;
+        const sx = box.get_width() / width;
+        const sy = box.get_height() / height;
+        for (const child of container.get_children()) {
+            const [, , w, h] = child.get_preferred_size();
+            child.allocate(new Clutter.ActorBox({ x1: -x * sx, y1: -y * sy, x2: (w - x) * sx, y2: (h - y) * sy }));
+        }
+    }
+});
+
 const ANCHOR_NAMES = [
     ['top-left', 'Top Left'], ['top-right', 'Top Right'], ['bottom-left', 'Bottom Left'], ['bottom-right', 'Bottom Right'],
     ['center', 'Center'],
@@ -21,7 +46,7 @@ const ANCHOR_NAMES = [
 
 /**
  * The glass clock and the desktop widgets, above the wallpaper and below
- * every window, so they are hidden with the windows in the overview. Each
+ * every window, and on the workspaces' wallpaper in the overview. Each
  * sits at a corner or the center of the primary monitor's work area, stacked
  * with the others there, unless the user moved it somewhere else. A right
  * click on one opens its menu, from which it can be moved (and the clock
@@ -45,6 +70,7 @@ export class DesktopLayer {
     _menuManager = null;
     _menuGlass = null;
     _edit = null;
+    _overviewDisplay = null;
 
     constructor(_path, _settings, _logger, _openPreferences) {
         this._path = _path;
@@ -126,7 +152,18 @@ export class DesktopLayer {
         };
         this._signals.push({ target: Main.layoutManager, id: Main.layoutManager.connect('monitors-changed', relayout) });
         this._signals.push({ target: global.display, id: global.display.connect('workareas-changed', relayout) });
-        this._signals.push({ target: Main.overview, id: Main.overview.connect('showing', () => this._edit?.end()) });
+        this._signals.push({
+            target: Main.overview, id: Main.overview.connect('showing', () => {
+                this._edit?.end();
+                this._addToOverview();
+            }),
+        });
+        this._signals.push({
+            target: Main.overview, id: Main.overview.connect('hidden', () => {
+                this._leaveOverview();
+                this._syncWorkspace();
+            }),
+        });
         this._signals.push({
             target: global.workspace_manager, id: global.workspace_manager.connect('active-workspace-changed', () => {
                 this._edit?.end();
@@ -165,9 +202,57 @@ export class DesktopLayer {
         return this._settings.get_boolean('desktop-items-first-workspace-only');
     }
 
+    // In the overview the items are only seen through their clones; a hidden source would be mapped and unmapped by
+    // every clone paint.
     _syncWorkspace() {
         if (this._container)
-            this._container.visible = !this._firstWorkspaceOnly() || global.workspace_manager.get_active_workspace_index() === 0;
+            this._container.visible = Main.overview.visible || !this._firstWorkspaceOnly() ||
+                global.workspace_manager.get_active_workspace_index() === 0;
+    }
+
+    // The overview builds the primary monitor's workspaces anew each time it opens, before `showing`, and again
+    // when a swipe starts while it is open; it adds one whenever the last workspace stops being empty.
+    _addToOverview() {
+        this._leaveOverview();
+        const display = Main.overview._overview._controls._workspacesDisplay;
+        this._overviewDisplay = display;
+        display.connectObject('child-added', (_display, view) => this._addToView(view), this);
+        for (const view of display.get_children())
+            this._addToView(view);
+        this._syncWorkspace();
+    }
+
+    _addToView(view) {
+        if (!(view instanceof WorkspacesView))
+            return;
+        view.connectObject('child-added', (_view, actor) => this._addToWorkspace(actor), this);
+        for (const actor of view.get_children())
+            this._addToWorkspace(actor);
+    }
+
+    _leaveOverview() {
+        const display = this._overviewDisplay;
+        if (!display)
+            return;
+        for (const view of display.get_children())
+            view.disconnectObject(this);
+        display.disconnectObject(this);
+        this._overviewDisplay = null;
+    }
+
+    _addToWorkspace(actor) {
+        const container = this._container;
+        if (!container || !(actor instanceof Workspace) || !canCloneSource(container))
+            return;
+        const workspace = actor;
+        if (workspace.monitorIndex !== Main.layoutManager.primaryIndex)
+            return;
+        if (this._firstWorkspaceOnly() && workspace.metaWorkspace.index() !== 0)
+            return;
+        const monitor = Main.layoutManager.monitors[workspace.monitorIndex];
+        const holder = new Clutter.Actor({ x_expand: true, y_expand: true, layout_manager: new MonitorCloneLayout(monitor) });
+        holder.add_child(new Clutter.Clone({ source: container }));
+        workspace._background._backgroundGroup.add_child(holder);
     }
 
     // Puts a clone of the items on each workspace's wallpaper in the switch animation, so they move with it instead of
@@ -195,6 +280,7 @@ export class DesktopLayer {
 
     _removeContainer() {
         this._edit?.end();
+        this._leaveOverview();
         stopStageLoop(this._frameSignalSlot, this._frameSlot);
         removeBeforeRedraw(this._layoutLaterId);
         this._layoutLaterId = 0;

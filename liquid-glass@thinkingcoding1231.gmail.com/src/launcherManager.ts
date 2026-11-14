@@ -26,9 +26,12 @@ const TOP = 0.2;
 const MAX_RESULTS = 8;
 const PER_PROVIDER = 5;
 const ICON_SIZE = 32;
-const SEARCH_DELAY_MS = 120;
-// How long the previous results stay up while slow providers are still answering.
-const SETTLE_MS = 400;
+const SEARCH_DELAY_MS = 60;
+// How long the previous results stay up while the providers are still answering.
+const SETTLE_MS = 200;
+// How long a provider that missed the deadline is not waited for. A short query can be quick where a longer one
+// is not, so one quick answer says little.
+const SLOW_FOR_US = 60_000_000;
 const SHADER_PADDING = 20;
 const SHADOW_MARGIN = 60;
 const FADE_MS = 150;
@@ -126,8 +129,11 @@ export class Launcher {
   private _cancellable: Gio.Cancellable | null = null;
   // The running search's results so far, the providers it still waits for, and its deadline.
   private _found: Result[] = [];
-  private _waiting = 0;
+  private _waiting = new Set<string>();
   private _settleId = 0;
+  // When each provider last missed the deadline. Until SLOW_FOR_US later it is not waited for, so that one that
+  // never answers (GNOME Calendar's, at times) does not hold every search back; its results come in when they do.
+  private _slowSince = new Map<string, number>();
   private _results: Result[] = [];
   private _items: Item[] = [];
   // Of _items on the pinned page, how many are application tiles before the list, and in how many columns.
@@ -648,8 +654,8 @@ export class Launcher {
     return (Main.overview as any).searchController._searchResults._providers;
   }
 
-  // The previous results stay up until every provider has answered, or SETTLE_MS have passed, so that the glass
-  // does not shrink and grow back on each keystroke. Answers after the deadline are shown as they come.
+  // The previous results stay up until every provider that is not slow has answered, or SETTLE_MS have passed,
+  // so that the glass does not shrink and grow back on each keystroke. Later answers are shown as they come.
   private _search(): void {
     const text = this._entry?.text.trim() ?? '';
     this._terms = text ? text.split(/\s+/) : [];
@@ -657,19 +663,21 @@ export class Launcher {
     this._found = [];
     const value = evaluate(text);
     if (value !== null) this._found.push(this._calculation(text, value));
-    this._waiting = providers.length;
-    if (!this._waiting) {
-      this._commit();
-      return;
-    }
+    const started = GLib.get_monotonic_time();
+    this._waiting = new Set(providers.map(p => p.id).filter(id => started - (this._slowSince.get(id) ?? -SLOW_FOR_US) >= SLOW_FOR_US));
     const cancellable = new Gio.Cancellable();
     this._cancellable = cancellable;
-    if (this._settleId) GLib.Source.remove(this._settleId);
-    this._settleId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SETTLE_MS, () => {
-      this._settleId = 0;
+    if (this._waiting.size) {
+      if (this._settleId) GLib.Source.remove(this._settleId);
+      this._settleId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SETTLE_MS, () => {
+        this._settleId = 0;
+        for (const id of this._waiting) this._slowSince.set(id, GLib.get_monotonic_time());
+        this._commit();
+        return GLib.SOURCE_REMOVE;
+      });
+    } else {
       this._commit();
-      return GLib.SOURCE_REMOVE;
-    });
+    }
     providers.forEach((provider, order) => this._ask(provider, order, cancellable));
   }
 
@@ -692,8 +700,8 @@ export class Launcher {
     if (cancellable.is_cancelled()) return;
     const software = provider.id === SOFTWARE_PROVIDER;
     this._found.push(...metas.map(meta => ({ provider, order, meta, install: software && softwareDesktopId(meta.id) !== null })));
-    this._waiting--;
-    if (this._waiting === 0 || !this._settleId) this._commit();
+    this._waiting.delete(provider.id);
+    if (this._waiting.size === 0 || !this._settleId) this._commit();
   }
 
   private _isInstalled(softwareId: string): boolean {
