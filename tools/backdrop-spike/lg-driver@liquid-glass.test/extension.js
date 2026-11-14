@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcherenter, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1730,6 +1730,40 @@ export default class LgDriver extends Extension {
     launcher._showResults = show;
     for (const [provider, ask] of wrapped) provider.getInitialResultSet = ask;
     launcher.close();
+  }
+
+  // Presses Enter at once after typing a query, and reports what the launcher opened.
+  async _launcherEnter() {
+    const launcher = (await this._lgModule('launcherManager.js')).Launcher.instance;
+    const activate = launcher._activateResult;
+    let opened = null;
+    launcher._activateResult = function (result) {
+      opened = result.meta.name;
+    };
+    for (const [query, gap] of [['settings', 0], ['files', 0], ['term', 30], ['3*8', 0]]) {
+      launcher.open();
+      await sleep(1200);
+      opened = null;
+      for (let i = 1; i <= query.length; i++) {
+        launcher._entry.text = query.slice(0, i);
+        await sleep(40);
+      }
+      await sleep(gap);
+      const t0 = GLib.get_monotonic_time();
+      (launcher._enter ?? function () { this._items[this._selected]?.activate(); }).call(launcher);
+      const at = () => Math.round((GLib.get_monotonic_time() - t0) / 1000);
+      const waited = await new Promise(resolve => {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10, () => {
+          if (opened === null && at() < 1500) return GLib.SOURCE_CONTINUE;
+          resolve(at());
+          return GLib.SOURCE_REMOVE;
+        });
+      });
+      log(`launcherenter: "${query}" opened=${opened} after=${waited}ms ${opened !== null ? 'OK' : 'NG'}`);
+      launcher.close();
+      await sleep(800);
+    }
+    launcher._activateResult = activate;
   }
 
   // Opens the overview and the app grid and reports the clones of the items on the workspaces' wallpaper.
@@ -3976,6 +4010,8 @@ export default class LgDriver extends Extension {
       await this._overviewItems(settings, m);
     if (parts.includes('launchertiming'))
       await this._launcherTiming();
+    if (parts.includes('launcherenter'))
+      await this._launcherEnter();
     if (parts.includes('launcherglass'))
       await this._launcherGlass(settings);
     if (parts.includes('clockcull'))

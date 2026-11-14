@@ -134,6 +134,8 @@ export class Launcher {
   // When each provider last missed the deadline. Until SLOW_FOR_US later it is not waited for, so that one that
   // never answers (GNOME Calendar's, at times) does not hold every search back; its results come in when they do.
   private _slowSince = new Map<string, number>();
+  // Enter was pressed before the typed query's results came; the first of them opens when they do.
+  private _enterPending = false;
   private _results: Result[] = [];
   private _items: Item[] = [];
   // Of _items on the pinned page, how many are application tiles before the list, and in how many columns.
@@ -546,7 +548,7 @@ export class Launcher {
       return Clutter.EVENT_STOP;
     }
     if (this._isEnter(key)) {
-      this._items[this._selected]?.activate();
+      this._enter();
       return Clutter.EVENT_STOP;
     }
     return Clutter.EVENT_PROPAGATE;
@@ -630,7 +632,18 @@ export class Launcher {
     else this._logger.log(`[Liquid Glass] No search provider ${pin.provider} for pinned ${pin.id}`);
   }
 
+  private _enter(): void {
+    if (this._searchId) {
+      GLib.Source.remove(this._searchId);
+      this._searchId = 0;
+      this._search();
+    }
+    if (this._settleId) this._enterPending = true;
+    else this._items[this._selected]?.activate();
+  }
+
   private _cancelSearch(): void {
+    this._enterPending = false;
     if (this._searchId) GLib.Source.remove(this._searchId);
     this._searchId = 0;
     if (this._settleId) GLib.Source.remove(this._settleId);
@@ -660,10 +673,14 @@ export class Launcher {
     this._terms = text ? text.split(/\s+/) : [];
     const providers = this._terms.length ? this._providers() : [];
     this._found = [];
+    this._selected = 0;
     const value = evaluate(text);
     if (value !== null) this._found.push(this._calculation(text, value));
+    // The applications' own provider answers at once, and is always waited for, so that Enter pressed meanwhile
+    // has something to open.
     const started = GLib.get_monotonic_time();
-    this._waiting = new Set(providers.map(p => p.id).filter(id => started - (this._slowSince.get(id) ?? -SLOW_FOR_US) >= SLOW_FOR_US));
+    const isSlow = (id: string) => id !== 'applications' && started - (this._slowSince.get(id) ?? -SLOW_FOR_US) < SLOW_FOR_US;
+    this._waiting = new Set(providers.map(p => p.id).filter(id => !isSlow(id)));
     const cancellable = new Gio.Cancellable();
     this._cancellable = cancellable;
     if (this._waiting.size) {
@@ -730,7 +747,12 @@ export class Launcher {
     // The calculation first, then pinned results, then each provider's in the overview's order.
     const rank = (r: Result) => (r.provider ? (this._isPinned(r) ? 1 : 2) : 0);
     this._results = [...this._found].sort((a, b) => rank(a) - rank(b) || a.order - b.order).slice(0, MAX_RESULTS);
-    if (this._view === 'search' && !this._switch) this._showResults();
+    const shown = this._view === 'search' && !this._switch;
+    if (shown) this._showResults();
+    if (this._enterPending) {
+      this._enterPending = false;
+      if (shown) this._items[this._selected]?.activate();
+    }
   }
 
   private _showResults(): void {
