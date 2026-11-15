@@ -5,11 +5,15 @@ import GObject from 'gi://GObject';
 import { coglContext } from '../shellVersion.js';
 import { configureSamplerLayer } from './pipelines.js';
 
-// A pixel keeps its opacity in proportion to how far its colour is from its
-// neighbours' within 3 px, so text and borders stay solid (with a thin halo
-// that helps them read over a busy backdrop) while flat background lets the
-// glass through. Alpha is left out of the comparison: a window's edge and its
-// CSD shadow are not detail and must not grow a solid rim.
+// Replaces a window's own background with the glass. The background behind a
+// pixel is the colour most of 16 surrounding samples share, so it follows the
+// app's palette (and a header bar next to a terminal) without configuration.
+// The pixel is then split into a foreground over that colour, as GIMP's
+// "colour to alpha" does: flat background goes clear, anti-aliased glyph
+// edges keep their coverage instead of a halo, and strong strokes stay solid
+// in their own colour. Where no colour dominates (a photo, a gradient) the
+// pixel is left alone. Samples outside the window's opaque area do not vote,
+// so its rounded corners and CSD shadow are not mistaken for background.
 const DECL = `
 uniform float ck_tx;
 uniform float ck_ty;
@@ -23,24 +27,48 @@ vec3 ckUnpremul(vec4 c) {
 const BODY = `
 vec2 uv = cogl_tex_coord_in[0].st;
 vec4 c = texture2D(cogl_sampler0, uv);
-vec3 cc = ckUnpremul(c);
 vec2 texel = vec2(ck_tx, ck_ty);
-float detail = 0.0;
-for (int i = 0; i < 8; i++) {
-    float ang = float(i) * 0.7853982;
-    vec2 dir = vec2(cos(ang), sin(ang));
-    for (int j = 1; j <= 3; j++) {
-        float r = float(j);
-        vec4 s = texture2D(cogl_sampler0, uv + dir * r * texel);
-        float w = min(c.a, s.a) * exp(-(r - 1.0) * 0.8);
-        detail = max(detail, distance(cc, ckUnpremul(s)) * w);
+vec3 cs[16];
+float ca[16];
+for (int i = 0; i < 16; i++) {
+    float ring = i < 8 ? 0.0 : 1.0;
+    float ang = float(i) * 0.7853982 + ring * 0.3926991;
+    vec4 t = texture2D(cogl_sampler0, uv + vec2(cos(ang), sin(ang)) * (6.0 + 6.0 * ring) * texel);
+    cs[i] = ckUnpremul(t);
+    ca[i] = t.a;
+}
+float votes = 0.0;
+vec3 bg = vec3(0.0);
+for (int i = 0; i < 16; i++) {
+    if (ca[i] < 0.95)
+        continue;
+    float n = 0.0;
+    for (int j = 0; j < 16; j++) {
+        if (ca[j] >= 0.95 && distance(cs[i], cs[j]) < 0.035)
+            n += 1.0;
+    }
+    if (n > votes) {
+        votes = n;
+        bg = cs[i];
     }
 }
-float keep = mix(ck_opacity, 1.0, smoothstep(0.03, 0.18, detail));
-cogl_color_out = c * (keep * ck_paint);
+if (votes < 6.0 || c.a < 0.004) {
+    cogl_color_out = c * ck_paint;
+} else {
+    vec3 p = c.rgb / c.a;
+    vec3 up = max(p - bg, 0.0) / max(1.0 - bg, 0.001);
+    vec3 down = max(bg - p, 0.0) / max(bg, 0.001);
+    float coverage = clamp(max(max(max(up.r, up.g), up.b), max(max(down.r, down.g), down.b)), 0.0, 1.0);
+    // Most glyph pixels separate to 60-80 % coverage; lifting them to solid
+    // keeps text as legible as it was, the rest stays a soft edge.
+    float solid = clamp(coverage * 1.6, 0.0, 1.0);
+    vec3 fg = solid > 0.0 ? clamp(bg + (p - bg) / solid, 0.0, 1.0) : bg;
+    vec4 keyed = vec4(fg * solid, solid) + vec4(bg, 1.0) * (ck_opacity * (1.0 - solid));
+    cogl_color_out = keyed * (c.a * ck_paint);
+}
 `;
 
-/** Put on a window's surface: its flat background goes translucent, its content does not. */
+/** Put on a window's surface: its own background colours give way to the glass, its content does not. */
 export const ContentKey = GObject.registerClass(
   class ContentKey extends Clutter.OffscreenEffect {
     declare private _pipeline: Cogl.Pipeline | null;
@@ -52,7 +80,7 @@ export const ContentKey = GObject.registerClass(
       this._opacity = 1;
     }
 
-    /** Opacity (0 to 1) of the flat background areas. */
+    /** How much of the window's own background colour stays over the glass (0 to 1). */
     setOpacity(opacity: number): void {
       if (this._opacity === opacity) return;
       this._opacity = opacity;
