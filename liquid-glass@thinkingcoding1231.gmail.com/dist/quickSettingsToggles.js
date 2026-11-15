@@ -7,7 +7,7 @@ import Graphene from 'gi://Graphene';
 import Shell from 'gi://Shell';
 import { QS_MENU_TOGGLE_CLASS, offscreenFormat, paintNodeWithContext, setUniformVector, uniformDeclarations } from './shellVersion.js';
 import { GlassActor, StageCopier, addBlit, createTarget, isPaintingView, RelaySet, localToStage } from './rendering/backdropGlass.js';
-import { configureSamplerLayer } from './rendering/pipelines.js';
+import { configureSamplerLayer, fragmentSnippet } from './rendering/pipelines.js';
 import { setTranslationIfChanged, setScaleIfChanged, isActorValid } from './actors.js';
 // Quick Settings' toggle-button mode: every toggle pod gets its own piece of
 // glass. This finds the pods, samples each pod's own color (it changes with
@@ -667,9 +667,7 @@ export const ToggleBackdropGlass = GObject.registerClass(paintNodeWithContext(cl
             this._composeBase = Cogl.Pipeline.new(ctx);
             configureSamplerLayer(this._composeBase, 0);
             configureSamplerLayer(this._composeBase, 1);
-            const snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(COMPOSE_DECL), null);
-            snippet.set_replace(COMPOSE_BODY);
-            this._composeBase.add_snippet(snippet);
+            this._composeBase.add_snippet(fragmentSnippet(uniformDeclarations(COMPOSE_DECL), COMPOSE_BODY));
         }
         const pipeline = this._renderer.passes.pipeline('toggle-compose', this._composeBase);
         pipeline.set_layer_texture(0, desktop);

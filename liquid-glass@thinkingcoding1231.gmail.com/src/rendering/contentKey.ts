@@ -3,7 +3,7 @@ import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 
 import { coglContext } from '../shellVersion.js';
-import { configureSamplerLayer } from './pipelines.js';
+import { configureSamplerLayer, fragmentSnippet } from './pipelines.js';
 
 // A pixel keeps its opacity in proportion to how far its colour is from its
 // neighbours' within 3 px, so text and borders stay solid (with a thin halo
@@ -65,9 +65,7 @@ export const ContentKey = GObject.registerClass(
       if (!this._pipeline) {
         this._pipeline = Cogl.Pipeline.new(coglContext());
         configureSamplerLayer(this._pipeline, 0);
-        const snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, DECL, null);
-        snippet.set_replace(BODY);
-        this._pipeline.add_snippet(snippet);
+        this._pipeline.add_snippet(fragmentSnippet(DECL, BODY));
       }
       const p = this._pipeline;
       const w = texture.get_width();

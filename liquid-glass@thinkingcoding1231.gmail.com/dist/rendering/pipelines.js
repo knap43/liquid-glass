@@ -94,9 +94,26 @@ const SHADER_FILES = ['downsample.frag', 'upsample.frag', 'glass.frag'];
 // (a notification banner sliding in) then has them before its first frame,
 // where reading them again would leave it undrawn for a few frames.
 const shaderSources = new Map();
+// Cogl caches compiled programs by snippet identity, not by source, so a
+// glass made on demand (the launcher, a banner) with snippets of its own
+// compiles every shader again and stalls its first frames. Equal sources share
+// one snippet; snippets are immutable once added to a pipeline.
+const fragmentSnippets = new Map();
+
+export function fragmentSnippet(decl, body) {
+    const key = `${decl}\0${body}`;
+    let snippet = fragmentSnippets.get(key);
+    if (!snippet) {
+        snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, decl, null);
+        snippet.set_replace(body);
+        fragmentSnippets.set(key, snippet);
+    }
+    return snippet;
+}
 
 export function clearShaderSources() {
     shaderSources.clear();
+    fragmentSnippets.clear();
 }
 
 export class ShaderPipelines {
@@ -182,17 +199,13 @@ export class ShaderPipelines {
         configureSamplerLayer(this.downsample, 0);
         if (this._downsampleSource) {
             const downSnippet = splitShader(this._downsampleSource, message => this._logger?.warn(message));
-            const s = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(downSnippet.decl), null);
-            s.set_replace(downSnippet.body);
-            this.downsample.add_snippet(s);
+            this.downsample.add_snippet(fragmentSnippet(uniformDeclarations(downSnippet.decl), downSnippet.body));
         }
         this.upsample = Cogl.Pipeline.new(ctx);
         configureSamplerLayer(this.upsample, 0);
         if (this._upsampleSource) {
             const upSnippet = splitShader(this._upsampleSource, message => this._logger?.warn(message));
-            const s = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(upSnippet.decl), null);
-            s.set_replace(upSnippet.body);
-            this.upsample.add_snippet(s);
+            this.upsample.add_snippet(fragmentSnippet(uniformDeclarations(upSnippet.decl), upSnippet.body));
         }
         this.passthrough = Cogl.Pipeline.new(ctx);
         configureSamplerLayer(this.passthrough, 0);
@@ -203,8 +216,7 @@ export class ShaderPipelines {
         this.boxDown = Cogl.Pipeline.new(ctx);
         configureSamplerLayer(this.boxDown, 0);
         {
-            const boxSnip = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations('uniform vec2 inv_size;\n'), null);
-            boxSnip.set_replace('vec2 uv = cogl_tex_coord_in[0].st;\n' +
+            const boxSnip = fragmentSnippet(uniformDeclarations('uniform vec2 inv_size;\n'), 'vec2 uv = cogl_tex_coord_in[0].st;\n' +
                 'vec4 c  = texture2D(cogl_sampler0, uv + vec2( 1.0,  1.0) * inv_size);\n' +
                 'c += texture2D(cogl_sampler0, uv + vec2( 1.0, -1.0) * inv_size);\n' +
                 'c += texture2D(cogl_sampler0, uv + vec2(-1.0,  1.0) * inv_size);\n' +
@@ -238,9 +250,7 @@ export class ShaderPipelines {
         body = body.replace(/\bcogl_sampler\b/g, 'cogl_sampler0');
         if (this._shapeTexture)
             decl = `#define LG_SHAPE_TEXTURE 1\n${decl}`;
-        const snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(decl), null);
-        snippet.set_replace(body);
-        this.composite.add_snippet(snippet);
+        this.composite.add_snippet(fragmentSnippet(uniformDeclarations(decl), body));
     }
 }
 
@@ -500,15 +510,11 @@ export class BlurRenderer {
         this._gaussianHPipeline = Cogl.Pipeline.new(ctx);
         configureSamplerLayer(this._gaussianHPipeline, 0);
         const hSnippet = buildGaussianSnippet(kernel, 'h');
-        const hSnip = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(hSnippet.decl), null);
-        hSnip.set_replace(hSnippet.body);
-        this._gaussianHPipeline.add_snippet(hSnip);
+        this._gaussianHPipeline.add_snippet(fragmentSnippet(uniformDeclarations(hSnippet.decl), hSnippet.body));
         this._gaussianVPipeline = Cogl.Pipeline.new(ctx);
         configureSamplerLayer(this._gaussianVPipeline, 0);
         const vSnippet = buildGaussianSnippet(kernel, 'v');
-        const vSnip = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(vSnippet.decl), null);
-        vSnip.set_replace(vSnippet.body);
-        this._gaussianVPipeline.add_snippet(vSnip);
+        this._gaussianVPipeline.add_snippet(fragmentSnippet(uniformDeclarations(vSnippet.decl), vSnippet.body));
         this._gaussianKernel = kernel;
         this._gaussianPipelineDirty = false;
         this._pendingGaussianKernel = null;
@@ -824,9 +830,7 @@ export const ContentLens = GObject.registerClass(class ContentLens extends Clutt
         if (!this._pipeline) {
             this._pipeline = Cogl.Pipeline.new(coglContext());
             configureSamplerLayer(this._pipeline, 0);
-            const snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, uniformDeclarations(DECL), null);
-            snippet.set_replace(BODY);
-            this._pipeline.add_snippet(snippet);
+            this._pipeline.add_snippet(fragmentSnippet(uniformDeclarations(DECL), BODY));
             this._apply();
         }
         this._locate();

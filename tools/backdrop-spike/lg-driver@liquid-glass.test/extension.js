@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1730,6 +1730,52 @@ export default class LgDriver extends Extension {
     launcher._showResults = show;
     for (const [provider, ask] of wrapped) provider.getInitialResultSet = ask;
     launcher.close();
+  }
+
+  // Opens the launcher a few times and reports what open() costs, split by its steps, how long until the first
+  // frame with it is painted and until its fade-in ends, and the longest stall between frames meanwhile.
+  async _launcherOpen() {
+    const launcher = (await this._lgModule('launcherManager.js')).Launcher.instance;
+    const parts = {};
+    const timed = [];
+    const wrap = (obj, name, label) => {
+      const fn = obj[name];
+      timed.push([obj, name, fn]);
+      obj[name] = function (...args) {
+        const t0 = GLib.get_monotonic_time();
+        try {
+          return fn.apply(this, args);
+        } finally {
+          parts[label] = (parts[label] ?? 0) + GLib.get_monotonic_time() - t0;
+        }
+      };
+    };
+    wrap(launcher._icons, 'prepareLauncherHost', 'iconHost');
+    for (const name of ['_applyMaterial', '_limitResults', '_colorText', '_sync'])
+      wrap(launcher, name, name.slice(1));
+    for (let round = 0; round < 5; round++) {
+      for (const k of Object.keys(parts)) delete parts[k];
+      const paints = [];
+      const paintId = global.stage.connect('after-paint', () => paints.push(GLib.get_monotonic_time()));
+      const t0 = GLib.get_monotonic_time();
+      launcher.open();
+      const t1 = GLib.get_monotonic_time();
+      let faded = 0;
+      while (!faded && GLib.get_monotonic_time() - t0 < 3000000) {
+        await sleep(5);
+        if (launcher._root?.opacity === 255) faded = GLib.get_monotonic_time();
+      }
+      await sleep(300);
+      global.stage.disconnect(paintId);
+      const ms = us => (us / 1000).toFixed(1);
+      const firstPaint = paints[0] ?? 0;
+      const maxGap = Math.max(0, ...paints.map((t, i) => t - (i ? paints[i - 1] : t0)));
+      log(`launcheropen: round=${round} open=${ms(t1 - t0)}ms firstPaint=${firstPaint ? ms(firstPaint - t0) : '-'}ms ` +
+        `faded=${faded ? ms(faded - t0) : '-'}ms frames=${paints.length} maxGap=${ms(maxGap)}ms parts=${Object.entries(parts).map(([k, v]) => `${k}:${ms(v)}`).join(' ')}`);
+      launcher.close();
+      await sleep(800);
+    }
+    for (const [obj, name, fn] of timed) obj[name] = fn;
   }
 
   // Types a query and presses Enter with a virtual keyboard, Enter at once or after the results came, and reports
@@ -4071,6 +4117,8 @@ export default class LgDriver extends Extension {
       await this._overviewItems(settings, m);
     if (parts.includes('launchertiming'))
       await this._launcherTiming();
+    if (parts.includes('launcheropen'))
+      await this._launcherOpen();
     if (parts.includes('launcherenter'))
       await this._launcherEnter();
     if (parts.includes('launcherenterkeys'))

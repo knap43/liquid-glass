@@ -17,7 +17,7 @@ import { accentColors, watchAccentColor, coglContext } from '../shellVersion.js'
 import { iconStyleColors, iconStyleUniforms } from './styleColors.js';
 import { LENS_SIZE, MAP_SIZE } from './styleMap.js';
 import { WorkerProcess } from '../workers/workerProcess.js';
-import { rectInOffscreen, configureSamplerLayer, splitShader } from '../rendering/pipelines.js';
+import { rectInOffscreen, configureSamplerLayer, splitShader, fragmentSnippet } from '../rendering/pipelines.js';
 import { GlassRenderer } from '../rendering/glassRenderer.js';
 import { RelaySet, SAMPLE_MARGIN, relayHolder, StageCopier } from '../rendering/backdropGlass.js';
 // The id the Show Apps button goes by in the application lists.
@@ -754,9 +754,7 @@ export function iconStylePipeline(source, glass = false) {
     const split = splitShader(source);
     const decl = glass ? `#define LG_ICON_GLASS 1\n${split.decl}` : split.decl;
     const body = split.body;
-    const snippet = Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT, decl.replace(/uniform\s+sampler2D\s+cogl_sampler\d\s*;[^\n]*/g, ''), null);
-    snippet.set_replace(body);
-    pipeline.add_snippet(snippet);
+    pipeline.add_snippet(fragmentSnippet(decl.replace(/uniform\s+sampler2D\s+cogl_sampler\d\s*;[^\n]*/g, ''), body));
     return pipeline;
 }
 
