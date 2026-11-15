@@ -17,3 +17,7 @@ declare module 'gi://Gst?version=1.0' {
 declare module 'resource:///org/gnome/shell/ui/workspaceSwitcherPopup.js' {
   export const WorkspaceSwitcherPopup: any;
 }
+
+declare module 'resource:///org/gnome/shell/ui/shellEntry.js' {
+  export const EntryMenu: any;
+}

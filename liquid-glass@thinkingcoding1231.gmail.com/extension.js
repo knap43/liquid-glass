@@ -3,7 +3,8 @@ import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {UIManager} from './dist/uiManager.js';
-import {PanelMenuManager, ExtraDateMenuManager, DockMenuManager} from './dist/panelMenuManager.js';
+import {PanelMenuManager, ExtraDateMenuManager} from './dist/panelMenuManager.js';
+import {ContextMenuManager} from './dist/contextMenuManager.js';
 import {BlurMyShellWatch} from './dist/blurMyShell.js';
 import {DockWatcher} from './dist/dockManager.js';
 import {NotificationManager} from './dist/notificationManager.js';
@@ -57,8 +58,8 @@ export default class LiquidGlassExtension extends Extension {
     this._panelMenuManager = new PanelMenuManager(path, this._settings, this._logger);
     this._panelMenuManager.setup();
 
-    this._dockMenuManager = new DockMenuManager(path, this._settings, this._logger);
-    this._dockMenuManager.setup();
+    this._contextMenuManager = new ContextMenuManager(path, this._settings, this._logger);
+    this._contextMenuManager.setup();
 
     this._topBarManager = new TopBarManager(path, this._settings, this._logger);
     this._topBarManager.setup();
@@ -129,8 +130,8 @@ export default class LiquidGlassExtension extends Extension {
 
     this._panelMenuManager?.cleanup();
     this._panelMenuManager = null;
-    this._dockMenuManager?.cleanup();
-    this._dockMenuManager = null;
+    this._contextMenuManager?.cleanup();
+    this._contextMenuManager = null;
 
     this._topBarManager?.cleanup();
     this._topBarManager = null;

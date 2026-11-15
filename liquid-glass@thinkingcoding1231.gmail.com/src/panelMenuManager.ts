@@ -1,7 +1,6 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
-import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as DateMenu from 'resource:///org/gnome/shell/ui/dateMenu.js';
@@ -11,7 +10,10 @@ import { Logger } from './logger.js';
 
 // Settings prefix for every detected panel menu, separate from the calendar's
 // `menu-*` keys (see UIManager._keyPrefix).
-const PANEL_MENU_PREFIX = 'panel-menu';
+export const PANEL_MENU_PREFIX = 'panel-menu';
+
+// The shell's right-click menus, which ContextMenuManager gives glass; listed with these menus to be switched off one by one.
+export const CONTEXT_MENUS = ['appIconMenu', 'windowMenu', 'backgroundMenu', 'textFieldMenu'] as const;
 
 // Menus that had their own switch before the generic detection existed.
 const LEGACY_KEYS: Record<string, string> = {
@@ -87,7 +89,7 @@ export class PanelMenuManager {
   private _discover(panel: any): { buttons: Set<any>, wanted: Map<any, { name: string }>, detected: string[] } {
     const buttons = new Set<any>();
     const wanted = new Map<any, { name: string }>();
-    const detected: string[] = [];
+    const detected: string[] = [...CONTEXT_MENUS];
     const disabled = new Set(this._settings.get_strv('disabled-extra-menus'));
     const enabled = this._settings.get_boolean('enable-extra-menu-glass');
     const reserved = new Set([panel.statusArea.dateMenu?.menu, panel.statusArea.quickSettings?.menu]);
@@ -183,72 +185,9 @@ export class PanelMenuManager {
 }
 
 // PopupMenu sets itself as its actor's _delegate.
-function menuOf(actor: Clutter.Actor): PopupMenu.PopupMenu | null {
+export function menuOf(actor: Clutter.Actor): PopupMenu.PopupMenu | null {
   const delegate = '_delegate' in actor ? actor._delegate : null;
   return delegate instanceof PopupMenu.PopupMenu ? delegate : null;
-}
-
-/**
- * Glass behind Dash to Dock's app icon menus (and its show-apps button's) while dock-menus-grow is on, which grow
- * out of the dock's glass. They follow the other panel menus' switch and settings.
- */
-export class DockMenuManager {
-  private _signals: { target: Clutter.Actor; id: number }[] = [];
-  private _menus = new Map<PopupMenu.PopupMenu, { manager: UIManager, actor: Clutter.Actor, destroyId: number }>();
-  private _settingsIds: number[] = [];
-  private _attached = 0;
-
-  constructor(private _path: string, private _settings: Gio.Settings, private _logger: Logger) {}
-
-  setup() {
-    const uiGroup = Main.layoutManager.uiGroup;
-    // Dash to Dock builds a menu on its first popup, which adds itself to uiGroup and opens at once: it is attached
-    // here, before it opens, rather than on a later scan.
-    this._signals.push({ target: uiGroup, id: uiGroup.connect('child-added', (_group, actor) => this._attach(actor)) });
-    this._settingsIds = DOCK_MENU_KEYS.map(key => this._settings.connect(`changed::${key}`, () => this._rescan()));
-    this._rescan();
-  }
-
-  private _enabled(): boolean {
-    return DOCK_MENU_KEYS.every(key => this._settings.get_boolean(key));
-  }
-
-  private _rescan() {
-    this._detachAll();
-    if (!this._enabled()) return;
-    for (const child of Main.layoutManager.uiGroup.get_children()) this._attach(child);
-  }
-
-  private _attach(actor: Clutter.Actor) {
-    const menu = menuOf(actor);
-    if (!menu || this._menus.has(menu) || !this._enabled()) return;
-    if (!(actor instanceof St.Widget) || !actor.has_style_class_name('dock-app-menu') || !menu.box) return;
-    const manager = new UIManager(this._path, this._settings, this._logger, { menu }, false,
-      'enable-extra-menu-glass', PANEL_MENU_PREFIX, `menu:dock${++this._attached}`, false);
-    manager.setup();
-    const destroyId = actor.connect('destroy', () => {
-      this._menus.delete(menu);
-      manager.cleanup();
-    });
-    this._menus.set(menu, { manager, actor, destroyId });
-  }
-
-  private _detachAll() {
-    for (const { manager, actor, destroyId } of this._menus.values()) {
-      actor.disconnect(destroyId);
-      manager.cleanup();
-    }
-    this._menus.clear();
-  }
-
-  cleanup() {
-    for (const { target, id } of this._signals)
-      target.disconnect(id);
-    this._signals = [];
-    for (const id of this._settingsIds) this._settings.disconnect(id);
-    this._settingsIds = [];
-    this._detachAll();
-  }
 }
 
 /**

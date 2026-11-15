@@ -6,7 +6,7 @@ const path = require('node:path');
 // Exercise built managers with shell actors stubbed; no GNOME session required.
 function loadClass(file, name, bindings) {
   const code = fs.readFileSync(path.join(__dirname, '../liquid-glass@thinkingcoding1231.gmail.com/dist', file), 'utf8')
-    .replace(/^import[\s\S]*?;\n/gm, '').replace(/export class /g, 'class ');
+    .replace(/^import[\s\S]*?;\n/gm, '').replace(/^export (class|const|function) /gm, '$1 ');
   return new Function(...Object.keys(bindings), `${code}\nreturn ${name};`)(...Object.values(bindings));
 }
 class Signals {
@@ -57,12 +57,15 @@ function panelFixture() {
   return { ...clock, manager, settings, panel, instances, add, Popup };
 }
 
+// The shell's right-click menus are always listed with the panel menus.
+const withContextMenus = names => [...names, 'appIconMenu', 'backgroundMenu', 'textFieldMenu', 'windowMenu'].sort();
+
 test('discovers arbitrary and late menus, excluding built-ins and dummy menus', () => {
   const f = panelFixture();
   f.add('dateMenu'); f.add('quickSettings'); f.add('dummy', {}); f.add('keyboard'); f.flush();
-  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), ['keyboard']);
+  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), withContextMenus(['keyboard']));
   f.add('thirdPartyExample'); f.flush();
-  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), ['keyboard', 'thirdPartyExample']);
+  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), withContextMenus(['keyboard', 'thirdPartyExample']));
   assert.equal(f.instances.length, 2);
   assert.equal(f.instances[0].cleaned, 0); // existing open menu remains untouched
   f.manager.cleanup();
@@ -78,7 +81,7 @@ test('per-menu exclusion and master toggle preserve detection and other instance
   assert.equal(f.instances[1].cleaned, 0);
   f.settings.set('enable-vitals-menu-glass', false); f.flush();
   assert.equal(f.instances[1].cleaned, 1);
-  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), ['custom', 'vitalsMenu']);
+  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), withContextMenus(['custom', 'vitalsMenu']));
   f.settings.set('enable-extra-menu-glass', false); f.flush();
   f.settings.set_strv('disabled-extra-menus', []); f.flush();
   assert.equal(f.instances.length, 2);
@@ -93,7 +96,7 @@ test('menu replacement and removal clean up only affected managers', () => {
   assert.equal(f.instances[0].cleaned, 1); assert.equal(f.instances.length, 2);
   button.attached = false; f.panel._rightBox.emit('child-removed', button); f.flush();
   assert.equal(f.instances[1].cleaned, 1); assert.equal(button.handlers.size, 0);
-  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), []);
+  assert.deepEqual(f.settings.get_strv('detected-extra-menus'), withContextMenus([]));
   f.manager.cleanup();
 });
 

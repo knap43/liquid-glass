@@ -160,6 +160,13 @@ const LEGACY_MENUS = {
   vitalsMenu: ['enable-vitals-menu-glass', 'Vitals'],
 };
 
+const CONTEXT_MENU_TITLES = {
+  appIconMenu: 'App icon right-click menus',
+  windowMenu: 'Window title bar menu',
+  backgroundMenu: 'Desktop background menu',
+  textFieldMenu: 'Text field menus',
+};
+
 const BMS_UUID = 'blur-my-shell@aunetx';
 const BMS_SCHEMA = 'org.gnome.shell.extensions.blur-my-shell';
 
@@ -344,15 +351,15 @@ function addBackup(page, controls, window) {
 }
 
 function addPanelMenus(page, controls) {
-  const group = controls.group(page, 'Detected top bar menus',
-    'Menus of the other top bar indicators. The calendar and quick settings have their own settings.');
+  const group = controls.group(page, 'Detected menus',
+    "Menus of the other top bar indicators, and the shell's right-click menus. The calendar and quick settings have their own settings.");
   const empty = new Adw.ActionRow({ title: 'No additional menus detected' });
   group.add(empty);
   const rows = new Map();
   const settings = controls.settings;
   let syncing = false;
   const add = name => {
-    const title = LEGACY_MENUS[name]?.[1] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ');
+    const title = LEGACY_MENUS[name]?.[1] ?? CONTEXT_MENU_TITLES[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ');
     const row = new Adw.SwitchRow({ title, use_markup: false });
     row.connect('notify::active', () => {
       if (syncing) return;

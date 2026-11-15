@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), buttonglass (menu buttons on their own glass), dockslide (Dash to Dock's autohide slide, LG_DTD_DIR), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), buttonglass (menu buttons on their own glass), contextmenus (the shell's right-click menus), dockslide (Dash to Dock's autohide slide, LG_DTD_DIR), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1708,6 +1708,99 @@ export default class LgDriver extends Extension {
         `last=${gaps.at(-1)} ${gaps.slice(2).every(g => Math.abs(g - gaps.at(-1)) <= 1) ? 'OK' : 'NG'}`);
     }
     global.stage.disconnect(id);
+  }
+
+  // The shell's right-click menus: each has one glass under it while it is open, and the switch for its kind
+  // in the detected menus takes it off.
+  async _contextMenus(settings, m) {
+    settings.set_boolean('enable-extra-menu-glass', true);
+    settings.set_strv('disabled-extra-menus', []);
+    await sleep(500);
+    const check = async (label, menu, open, expected = 1) => {
+      open();
+      await sleep(1200);
+      const glasses = lg().glassObjects().filter(g => /^menu:context\d+$/.test(g._owner) && g.mapped && g.opacity > 0);
+      const [bx, by] = menu.box.get_transformed_position();
+      const [bw, bh] = menu.box.get_transformed_size();
+      const r = glasses[0]?._renderer?.geometry?.rect;
+      // The glass rect is padded by 20 on each side (SHADER_PADDING).
+      const off = r ? [r[0] + 20 - bx, r[1] + 20 - by, r[2] - 40 - bw, r[3] - 40 - bh].map(v => Math.round(v)) : null;
+      log(`contextmenus: ${label} open=${menu.isOpen} glasses=${glasses.length} box=[${[bx, by, bw, bh].map(Math.round)}] ` +
+        `offset=[${off}] ${menu.isOpen && glasses.length === expected ? 'OK' : 'NG'}`);
+      await shot(`contextmenus-${label}`, [m.x, m.y, m.width, m.height]);
+      if (menu.isOpen) menu.close();
+      await sleep(800);
+    };
+
+    const bgMenu = Main.layoutManager._bgManagers[0].backgroundActor._backgroundMenu;
+    const openBg = () => {
+      Main.layoutManager.setDummyCursorGeometry(m.x + 400, m.y + 300, 0, 0);
+      bgMenu.open();
+    };
+    await check('background', bgMenu, openBg);
+
+    const {EntryMenu, addContextMenu} = await import('resource:///org/gnome/shell/ui/shellEntry.js');
+    const entry = new St.Entry({style_class: 'search-entry', width: 300, x: m.x + 600, y: m.y + 200, text: 'liquid'});
+    Main.layoutManager.uiGroup.add_child(entry);
+    addContextMenu(entry);
+    log(`contextmenus: entry menu is EntryMenu=${entry.menu instanceof EntryMenu}`);
+    await check('textfield', entry.menu, () => entry.menu.open());
+
+    const {AppMenu} = await import('resource:///org/gnome/shell/ui/appMenu.js');
+    const source = new St.Widget({width: 64, height: 64, x: m.x + 900, y: m.y + 400, reactive: true});
+    Main.layoutManager.uiGroup.add_child(source);
+    const appMenu = new AppMenu(source, St.Side.TOP);
+    appMenu.setApp(Shell.AppSystem.get_default().get_installed().map(info => Shell.AppSystem.get_default().lookup_app(info.get_id()))
+      .find(app => app) ?? null);
+    Main.layoutManager.uiGroup.add_child(appMenu.actor);
+    await check('appicon', appMenu, () => appMenu.open());
+
+    const a = await this._spawn(['gjs', '-m', `${this.path}/rows-app.js`], 'lgdrv-rows');
+    if (a) {
+      const frame = a.win.get_frame_rect();
+      let windowMenu = null;
+      const id = Main.layoutManager.uiGroup.connect('child-added', (_g, actor) => {
+        if (actor._delegate?.actor === actor && actor.has_style_class_name?.('window-menu')) windowMenu = actor._delegate;
+      });
+      Main.wm._windowMenuManager.showWindowMenuForWindow(a.win, Meta.WindowMenuType.WM,
+        new Mtk.Rectangle({x: frame.x + 60, y: frame.y + 20, width: 0, height: 0}));
+      Main.layoutManager.uiGroup.disconnect(id);
+      if (windowMenu) await check('window', windowMenu, () => {});
+      else log('contextmenus: window menu not found NG');
+    } else {
+      log('contextmenus: no window NG');
+    }
+
+    const dock = findActors(Main.layoutManager.uiGroup, x => x.name === 'dashtodockContainer')[0];
+    const icon = dock && findActors(dock, x => typeof x.popupMenu === 'function' && x.app)[0];
+    for (const grow of icon ? [true, false, true] : []) {
+      settings.set_boolean('dock-menus-grow', grow);
+      await sleep(800);
+      icon.popupMenu();
+      await sleep(100);
+      // Grown out of the dock, the menu is drawn by the dock's glass; floating, by its own. Either way its box stays see-through.
+      const owners = lg().glassObjects().filter(g => g.mapped && g.opacity > 0).map(g => g._owner).filter(o => /^menu:context\d+$/.test(o));
+      const clear = icon._menu.box.has_style_class_name('liquid-glass-transparent');
+      log(`contextmenus: dock grow=${grow} owners=[${owners}] clear=${clear} ${owners.length === (grow ? 0 : 1) && clear ? 'OK' : 'NG'}`);
+      await sleep(1100);
+      await shot(`contextmenus-dock-${grow}`, [m.x, m.y, m.width, m.height]);
+      icon._menu?.close();
+      await sleep(800);
+    }
+    settings.set_boolean('dock-menus-grow', true);
+
+    settings.set_strv('disabled-extra-menus', ['backgroundMenu']);
+    await sleep(500);
+    await check('background-off', bgMenu, openBg, 0);
+    settings.set_strv('disabled-extra-menus', []);
+
+    const owners = () => lg().glassObjects().map(g => g._owner).filter(o => /^menu:context\d+$/.test(o));
+    const before = owners();
+    appMenu.destroy();
+    source.destroy();
+    entry.destroy();
+    await sleep(300);
+    log(`contextmenus: destroyed two menus, glass before=[${before}] after=[${owners()}] ${owners().length === before.length - 2 ? 'OK' : 'NG'}`);
   }
 
   // Each menu's buttons on their own glass over the menu's: the regions, and the buttons' own backgrounds hidden.
@@ -4282,6 +4375,8 @@ export default class LgDriver extends Extension {
       await this._workspaceSwitcher(settings, m);
     if (parts.includes('buttonglass'))
       await this._buttonGlass(settings, m);
+    if (parts.includes('contextmenus'))
+      await this._contextMenus(settings, m);
     if (parts.includes('dockslide'))
       await this._dockSlide(settings, m);
     if (parts.includes('overviewitems'))
