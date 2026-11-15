@@ -643,8 +643,9 @@
       <summary>Blur radius</summary>
     </key>
     <key name="application-corner-radius" type="d">
-      <default>30.0</default>
+      <default>15.0</default>
       <summary>Corner radius</summary>
+      <description>Should match the windows' own corners (15 px for libadwaita apps), so a see-through window shows glass right to its edge.</description>
     </key>
     <key name="application-content-opacity" type="d">
       <default>0.85</default>
@@ -662,7 +663,7 @@
       <description>Adjusts the contrast of the glass effect behind application windows.</description>
     </key>
     <key name="application-saturation" type="d">
-      <default>1.0</default>
+      <default>1.5</default>
       <summary>Saturation</summary>
       <description>Adjusts the saturation of the glass effect behind application windows.</description>
     </key>

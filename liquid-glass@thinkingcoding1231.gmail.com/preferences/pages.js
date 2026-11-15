@@ -16,6 +16,8 @@ const SURFACES = ['dock', 'menu', 'panel-menu', 'notification', 'quick-settings'
   'top-bar', 'desktop-widget', 'launcher'];
 
 const sharedKeys = suffix => SURFACES.map(surface => `${surface}-${suffix}`);
+// Window glass has to follow the app's own corners, not the shell's style.
+const sharedCornerKeys = () => sharedKeys('corner-radius').filter(key => key !== 'application-corner-radius');
 
 const ADAPTIVE_SURFACES = ['menu', 'panel-menu', 'notification', 'quick-settings', 'osd', 'top-bar',
   'desktop-widget', 'launcher'];
@@ -930,7 +932,7 @@ export function buildPreferences(window, settings) {
   addBackup(appearance, controls, window);
   const glass = controls.group(appearance, 'Glass', 'One look for all effects. Existing differences stay until you change a control.');
   controls.number(glass, 'Blur', sharedKeys('blur-radius'), 0, 30, 1, '', { slider: true });
-  controls.number(glass, 'Corners', [...sharedKeys('corner-radius'), 'quick-settings-toggle-corner-radius'], 0, 200, 1, '', { slider: true });
+  controls.number(glass, 'Corners', [...sharedCornerKeys(), 'quick-settings-toggle-corner-radius'], 0, 200, 1, '', { slider: true });
   controls.color(glass, 'Tint', sharedKeys('tint-color'));
   controls.number(glass, 'Tint strength', sharedKeys('tint-strength'), 0, 1, 0.05, '', { slider: true });
   const outlineKeys = sharedKeys('outline-enabled');

@@ -155,10 +155,11 @@ test('editing shared blur updates all eleven surfaces in one transaction and no 
   assert.equal(f.row('Blur').subtitle, '');
 });
 
-test('corners include toggle glass and changing them does not enable any effect', () => {
+test('corners include toggle glass, leave window glass on the windows\' own corners, and enable no effect', () => {
   const f = fixture(); f.row('Corners').value = 24;
   assert.equal(f.values.get('quick-settings-toggle-corner-radius'), 24);
-  assert.equal(Object.keys(f.writes[0]).length, 12);
+  assert.equal(Object.keys(f.writes[0]).length, 11);
+  assert.equal('application-corner-radius' in f.writes[0], false);
   assert.equal(f.values.get('enable-application-glass'), false);
   assert.equal(f.values.get('top-bar-style'), 'off');
 });
