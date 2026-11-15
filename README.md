@@ -124,7 +124,7 @@ The effect can be enabled or disabled per UI element on the **Effects** page. In
 | **Notifications** | Glass behind notification banners. Supports **adaptive text coloring** and a hide safety margin to avoid flicker while the banner is dismissed. |
 | **Quick Settings** | Two modes: **Whole menu** applies one sheet of glass behind the whole panel, and **Individual buttons** turns every toggle button into its own piece of glass, keeping each toggle's own accent color (see "Button base color"). Also supports spring animation and adaptive text coloring; in Individual buttons mode the buttons can spring out of the middle of the menu as it opens, those nearest the panel button fastest. |
 | **OSD** | Glass behind the on-screen displays (volume, brightness, and so on), with adaptive text coloring. |
-| **Application Windows** | Glass behind application windows, with a **window content opacity** slider so the glass shows through the window itself. Applies either to selected applications, or to all windows minus exclusions. Both lists are filled from a live picker of your currently open windows, so there is no need to look up `WM_CLASS` values by hand. |
+| **Application Windows** | Glass behind application windows, with a **window content opacity** slider so the glass shows through the window's background, while its text and other detail stay opaque. Applies either to selected applications, or to all windows minus exclusions. Both lists are filled from a live picker of your currently open windows, so there is no need to look up `WM_CLASS` values by hand. |
 
 ### Glass Icons
 

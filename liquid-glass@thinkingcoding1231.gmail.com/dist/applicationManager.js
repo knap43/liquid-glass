@@ -1,6 +1,7 @@
 import Meta from 'gi://Meta';
 import GLib from 'gi://GLib';
 import { BackdropGlass } from './rendering/backdropGlass.js';
+import { ContentKey } from './rendering/contentKey.js';
 import { getWindowActors, isActorValid, getAllocatedSize, setActorVisible, ensureGlassAllocated, ensureWindowActorAllocated, clearStranded, setPositionIfChanged, setSizeIfChanged } from './actors.js';
 import { isFrameSyncFrozen, SAME_FRAME_WINDOW_US, hexToColorArray } from './animation.js';
 import { noteStrandEntry } from './diagnostics.js';
@@ -134,7 +135,7 @@ export class ApplicationManager {
     _updateWindowOpacities() {
         for (const state of this._states.values()) {
             if (isActorValid(state.surfaceActor))
-                state.surfaceActor.opacity = Math.round(this._getContentOpacity(state.profile) * 255);
+                state.contentKey.setOpacity(this._getContentOpacity(state.profile));
         }
     }
 
@@ -339,8 +340,9 @@ export class ApplicationManager {
         const surfaceActor = windowActor.get_first_child();
         if (!surfaceActor || !windowActor.get_parent())
             return;
-        const originalOpacity = surfaceActor.opacity;
-        surfaceActor.opacity = Math.round(this._getContentOpacity(profile) * 255);
+        const contentKey = new ContentKey();
+        contentKey.setOpacity(this._getContentOpacity(profile));
+        surfaceActor.add_effect_with_name('liquid-glass-content-key', contentKey);
         // Inside the window actor and below its surface: it moves, scales and
         // fades with the window, and it reads the stage after everything below
         // the window and before the window itself.
@@ -371,7 +373,7 @@ export class ApplicationManager {
             profile,
             windowActor,
             surfaceActor,
-            originalOpacity,
+            contentKey,
             glass,
             signals: [],
             maximized,
@@ -444,9 +446,7 @@ export class ApplicationManager {
             const shouldHideGlass = !this._glassOnMaximized && state.maximized;
             state.glass.setCornerRadius(shouldHideCorner ? 0 : this._settings.get_double('application-corner-radius'));
             if (isActorValid(state.surfaceActor)) {
-                state.surfaceActor.opacity = shouldHideGlass
-                    ? state.originalOpacity
-                    : Math.round(this._getContentOpacity(state.profile) * 255);
+                state.contentKey.set_enabled(!shouldHideGlass);
                 this._hideGlass(state);
             }
         };
@@ -642,7 +642,7 @@ export class ApplicationManager {
         // The glass is a child of the window actor, and already disposed when
         // this runs from the window actor's destroy handler.
         if (isActorValid(state.surfaceActor))
-            state.surfaceActor.opacity = state.originalOpacity;
+            state.surfaceActor.remove_effect(state.contentKey);
         state.glass.cleanup();
         if (isActorValid(state.glass))
             state.glass.destroy();

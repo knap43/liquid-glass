@@ -4,6 +4,7 @@ import type Mtk from 'gi://Mtk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { BackdropGlass } from './rendering/backdropGlass.js';
+import { ContentKey } from './rendering/contentKey.js';
 import {
   getWindowActors, isActorValid, getAllocatedSize, setActorVisible, ensureGlassAllocated,
   ensureWindowActorAllocated, clearStranded, setPositionIfChanged, setSizeIfChanged
@@ -56,8 +57,8 @@ interface WindowState {
   // The window's own surface. Cached because the glass is inserted below it,
   // after which get_first_child() no longer returns it.
   surfaceActor: Clutter.Actor;
-  // Surface opacity before the glass dialled it down; restored on cleanup.
-  originalOpacity: number;
+  // Lets the glass through the surface's background but not its content.
+  contentKey: ContentKey;
   glass: BackdropGlass;
   signals: { obj: any, id: number }[];
   // Pending later from _forceGlassReallocation().
@@ -187,7 +188,7 @@ export class ApplicationManager {
   _updateWindowOpacities() {
     for (const state of this._states.values()) {
       if (isActorValid(state.surfaceActor))
-        state.surfaceActor.opacity = Math.round(this._getContentOpacity(state.profile) * 255);
+        state.contentKey.setOpacity(this._getContentOpacity(state.profile));
     }
   }
 
@@ -404,8 +405,9 @@ export class ApplicationManager {
     if (!surfaceActor || !windowActor.get_parent())
       return;
 
-    const originalOpacity = surfaceActor.opacity;
-    surfaceActor.opacity = Math.round(this._getContentOpacity(profile) * 255);
+    const contentKey = new ContentKey();
+    contentKey.setOpacity(this._getContentOpacity(profile));
+    surfaceActor.add_effect_with_name('liquid-glass-content-key', contentKey);
 
     // Inside the window actor and below its surface: it moves, scales and
     // fades with the window, and it reads the stage after everything below
@@ -439,7 +441,7 @@ export class ApplicationManager {
       profile,
       windowActor,
       surfaceActor,
-      originalOpacity,
+      contentKey,
       glass,
       signals: [],
       maximized,
@@ -525,9 +527,7 @@ export class ApplicationManager {
       state.glass.setCornerRadius(shouldHideCorner ? 0 : this._settings.get_double('application-corner-radius'));
 
       if (isActorValid(state.surfaceActor)) {
-        state.surfaceActor.opacity = shouldHideGlass
-          ? state.originalOpacity
-          : Math.round(this._getContentOpacity(state.profile) * 255);
+        state.contentKey.set_enabled(!shouldHideGlass);
 
         this._hideGlass(state);
       }
@@ -736,7 +736,7 @@ export class ApplicationManager {
     // The glass is a child of the window actor, and already disposed when
     // this runs from the window actor's destroy handler.
     if (isActorValid(state.surfaceActor))
-      state.surfaceActor.opacity = state.originalOpacity;
+      state.surfaceActor.remove_effect(state.contentKey);
 
     state.glass.cleanup();
     if (isActorValid(state.glass))
