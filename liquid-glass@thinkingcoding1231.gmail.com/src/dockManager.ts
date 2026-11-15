@@ -7,7 +7,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { BackdropGlass } from './rendering/backdropGlass.js';
 import { reportFrameLoopError, Logger } from './logger.js';
 import {
-  ensureGlassAllocated, setClipIfChanged, isActorValid, placeScreenGlass, GLASS_SHADOW_MAX_RADIUS
+  ensureGlassAllocated, setClipIfChanged, isActorValid, placeScreenGlass, GLASS_SHADOW_MAX_RADIUS, getTransformedRect
 } from './actors.js';
 import {
   isFrameSyncFrozen, SAME_FRAME_WINDOW_US, startStageLoop, stopStageLoop, hexToColorArray
@@ -467,6 +467,11 @@ export class DashManager implements GrowthBar {
 
     let stableBaseW = tW + this._stableDeltaW;
     let stableBaseH = tH + this._stableDeltaH;
+    // Dash to Dock slides by shrinking the container that holds the dock, which then hangs out of the screen by
+    // the difference; the trim follows that edge, so the glass slides as one piece.
+    const hidden = slideHidden(this.targetActor, dockSide(edges));
+    if (hidden !== null)
+      return insetDockBounds(bounds, shiftEdge(monitor, dockSide(edges), hidden), edges, marginValue, stableBaseW, stableBaseH);
     return isMoving ? bounds : insetDockBounds(bounds, monitor, edges, marginValue, stableBaseW, stableBaseH);
   }
 
@@ -809,6 +814,36 @@ export function dockSide(edges: DockEdges): DockSide {
   if (minCenterDist === distTopCenter) return 'top';
   if (minCenterDist === distRightCenter) return 'right';
   return 'left';
+}
+
+// How far a Dash to Dock dock sliding by its slide-x hangs past its container on `side`, or null for a dock
+// without one.
+function slideHidden(actor: Clutter.Actor, side: DockSide): number | null {
+  for (let a = actor.get_parent(); a; a = a.get_parent()) {
+    const child = (a as any).child as Clutter.Actor | null;
+    if (typeof (a as any).slideX !== 'number' || !child) continue;
+    // Both read off the same layout, so they stay in step frame by frame.
+    const [ax, ay, aw, ah] = getTransformedRect(a);
+    const [cx, cy, cw, ch] = getTransformedRect(child);
+    if (![ax, ay, aw, ah, cx, cy, cw, ch].every(Number.isFinite)) return null;
+    switch (side) {
+    case 'top': return Math.max(0, ay - cy);
+    case 'bottom': return Math.max(0, cy + ch - (ay + ah));
+    case 'left': return Math.max(0, ax - cx);
+    case 'right': return Math.max(0, cx + cw - (ax + aw));
+    }
+  }
+  return null;
+}
+
+// The monitor with its `side` edge moved out by `by`.
+function shiftEdge(monitor: DockMonitor, side: DockSide, by: number): DockMonitor {
+  switch (side) {
+  case 'top': return { ...monitor, y: monitor.y - by, height: monitor.height + by };
+  case 'bottom': return { ...monitor, height: monitor.height + by };
+  case 'left': return { ...monitor, x: monitor.x - by, width: monitor.width + by };
+  case 'right': return { ...monitor, width: monitor.width + by };
+  }
 }
 
 // Trims the dock to `margin` from the screen edge it is closest to.

@@ -72,17 +72,21 @@ export class ToggleStyles {
     //    button together form one shape;
     //  - a standalone `.quick-toggle` (Night Light, Do Not Disturb, ...);
     //  - an `.icon-button` inside `.quick-settings-system-item` (screenshot,
-    //    settings, lock, power), which themes also draw as pills. Elsewhere
-    //    `.icon-button` is also used by slider and submenu buttons;
+    //    settings, lock, power), which themes also draw as pills;
     //  - a `.quick-slider` row, but only on themes that paint a pill around it
-    //    (see _paintsOwnBackground()).
+    //    (see _paintsOwnBackground()); otherwise its icon and menu buttons
+    //    (`.icon-button`), when the theme paints them.
     _findAllToggleContainers(actor, found = [], inSystemItem = false) {
         if (!actor)
             return found;
         const leaf = this._toggleLeafKind(actor, inSystemItem);
         if (leaf === 'slider') {
-            if (actor.visible && this._paintsOwnBackground(actor))
+            if (!actor.visible)
+                return found;
+            if (this._paintsOwnBackground(actor))
                 found.push(actor);
+            else
+                this._findSliderButtons(actor, found);
             return found;
         }
         if (leaf === 'toggle') {
@@ -95,6 +99,20 @@ export class ToggleStyles {
         for (let child of actor.get_children())
             this._findAllToggleContainers(child, found, entersSystemItem);
         return found;
+    }
+
+    _findSliderButtons(actor, found) {
+        for (const child of actor.get_children()) {
+            if (!child.visible)
+                continue;
+            if (child instanceof St.Widget && child.has_style_class_name('icon-button')) {
+                if (this._paintsOwnBackground(child))
+                    found.push(child);
+            }
+            else {
+                this._findSliderButtons(child, found);
+            }
+        }
     }
 
     _toggleLeafKind(actor, inSystemItem) {

@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), buttonglass (menu buttons on their own glass), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), buttonglass (menu buttons on their own glass), dockslide (Dash to Dock's autohide slide, LG_DTD_DIR), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1679,6 +1679,37 @@ export default class LgDriver extends Extension {
     settings.set_boolean('desktop-items-first-workspace-only', false);
   }
 
+  // Dash to Dock's autohide slide: the glass's bottom edge against the dock background's on every frame. With a
+  // margin, the gap between them should stay the same as the dock slides in and out (within a pixel: the slide
+  // container is allocated in whole pixels; the first frame of a slide is drawn before the glass hears of it).
+  async _dockSlide(settings, m) {
+    const dock = findActors(Main.layoutManager.uiGroup, a => a.name === 'dashtodockContainer')[0];
+    const bg = dock && findActors(dock, a => a instanceof St.Widget && a.has_style_class_name('dash-background'))[0];
+    const glass = lg().glassObjects().find(g => g._owner === 'dock');
+    if (!dock || !bg || !glass) {
+      log(`dockslide: dock=${!!dock} bg=${!!bg} glass=${!!glass} NG`);
+      return;
+    }
+    const rows = [];
+    const id = global.stage.connect('after-paint', () => {
+      const [, y] = bg.get_transformed_position();
+      const [, h] = bg.get_transformed_size();
+      const r = glass._renderer.geometry.rect;
+      // The glass rect is padded by 20 on each side (SHADER_PADDING).
+      rows.push([y + h - m.y, r[1] + r[3] - 20, r[1] + 20, y - m.y]);
+    });
+    for (const [dir, time] of [['out', 1.2], ['in', 1.2]]) {
+      rows.length = 0;
+      if (dir === 'out') dock._animateOut(time, 0); else dock._animateIn(time, 0);
+      await sleep(time * 1000 + 600);
+      const gaps = rows.map(([bgBottom, glassBottom]) => (bgBottom - glassBottom).toFixed(1));
+      const tops = rows.map(([, , glassTop, bgTop]) => (glassTop - bgTop).toFixed(1));
+      log(`dockslide: ${dir} frames=${rows.length} bottom gap=[${[...new Set(gaps)].join(' ')}] top gap=[${[...new Set(tops)].join(' ')}] ` +
+        `last=${gaps.at(-1)} ${gaps.slice(2).every(g => Math.abs(g - gaps.at(-1)) <= 1) ? 'OK' : 'NG'}`);
+    }
+    global.stage.disconnect(id);
+  }
+
   // Each menu's buttons on their own glass over the menu's: the regions, and the buttons' own backgrounds hidden.
   async _buttonGlass(settings, m) {
     const report = (label, owner, root) => {
@@ -1698,6 +1729,10 @@ export default class LgDriver extends Extension {
     dateMenu.close(false);
     await sleep(800);
 
+    // A slider row like the volume one, with its menu button shown.
+    const {QuickSlider} = await import('resource:///org/gnome/shell/ui/quickSettings.js');
+    const slider = new QuickSlider({iconName: 'audio-headphones-symbolic', menuEnabled: true});
+    Main.panel.statusArea.quickSettings.menu.addItem(slider, 2);
     for (const mode of [0, 1]) {
       settings.set_int('quick-settings-apply-to', mode);
       await sleep(500);
@@ -1705,11 +1740,15 @@ export default class LgDriver extends Extension {
       qs.open(false);
       await sleep(1500);
       report(`quick settings mode=${mode}`, mode ? 'quick-settings-toggles' : 'quick-settings:buttons', qs.box);
+      const sliderButtons = findActors(slider, a => a instanceof St.Button && a.has_style_class_name('icon-button'));
+      log(`buttonglass: slider buttons=${sliderButtons.length} glassed=${sliderButtons.filter(b => (b.get_style() ?? '').includes('transparent !important')).length} ` +
+        `${sliderButtons.length === 2 && sliderButtons.every(b => (b.get_style() ?? '').includes('transparent !important')) ? 'OK' : 'NG'}`);
       await shot(`buttonglass-qs-${mode}`, [m.x + m.width - 700, m.y, 700, 700]);
       qs.close(false);
       await sleep(800);
     }
     settings.set_int('quick-settings-apply-to', 0);
+    slider.destroy();
 
     // A row of the desktop menu's kind: the volume menu's rows highlighted by hand.
     const panelMenus = Object.values(Main.panel.statusArea).filter(b => b?.menu?.box && b !== Main.panel.statusArea.dateMenu &&
@@ -4243,6 +4282,8 @@ export default class LgDriver extends Extension {
       await this._workspaceSwitcher(settings, m);
     if (parts.includes('buttonglass'))
       await this._buttonGlass(settings, m);
+    if (parts.includes('dockslide'))
+      await this._dockSlide(settings, m);
     if (parts.includes('overviewitems'))
       await this._overviewItems(settings, m);
     if (parts.includes('launchertiming'))
