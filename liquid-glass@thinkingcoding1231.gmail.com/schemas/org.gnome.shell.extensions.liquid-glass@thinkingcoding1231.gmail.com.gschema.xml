@@ -542,6 +542,11 @@
       <default>true</default>
       <summary>Enable glass effect for OSD</summary>
     </key>
+    <key name="enable-workspace-switcher-glass" type="b">
+      <default>true</default>
+      <summary>Enable glass effect for the workspace switcher popup</summary>
+      <description>The popup shown while switching workspaces, drawn with the OSD's glass settings.</description>
+    </key>
     <key name="osd-enable-adaptive-text-color" type="b">
       <default>true</default>
       <summary>Enable adaptive text color</summary>

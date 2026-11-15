@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1677,6 +1677,65 @@ export default class LgDriver extends Extension {
     }
     St.Settings.get().slow_down_factor = 1;
     settings.set_boolean('desktop-items-first-workspace-only', false);
+  }
+
+  // The popup shown while switching workspaces, made the way the window manager makes it: its glass sits under
+  // the dots while it is shown, follows the switch off and on, and goes with the popup.
+  async _workspaceSwitcher(settings, m) {
+    const {WorkspaceSwitcherPopup} = await import('resource:///org/gnome/shell/ui/workspaceSwitcherPopup.js');
+    new Gio.Settings({schema_id: 'org.gnome.mutter'}).set_boolean('dynamic-workspaces', false);
+    new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'}).set_int('num-workspaces', 4);
+    await sleep(1000);
+    const wm = global.workspace_manager;
+    const glasses = () => lg().glassObjects().filter(g => g._owner === 'workspace-switcher');
+    const show = to => {
+      if (!Main.wm._workspaceSwitcherPopup) {
+        Main.wm._workspaceSwitcherPopup = new WorkspaceSwitcherPopup();
+        Main.wm._workspaceSwitcherPopup.connect('destroy', () => { Main.wm._workspaceSwitcherPopup = null; });
+      }
+      wm.get_workspace_by_index(to).activate(global.get_current_time());
+      Main.wm._workspaceSwitcherPopup.display(to);
+    };
+    const check = label => {
+      const list = findActors(Main.layoutManager.uiGroup, a => a instanceof St.Widget && a.has_style_class_name('workspace-switcher'))[0];
+      const g = glasses();
+      if (!list) {
+        log(`wsswitcher: ${label} no popup glasses=${g.length}`);
+        return;
+      }
+      const [x, y] = list.get_transformed_position();
+      const [w, h] = list.get_size();
+      const clip = g[0]?.get_clip() ?? [];
+      const inside = g.length === 1 && g[0].visible && clip[0] + g[0].x <= x && clip[1] + g[0].y <= y &&
+        clip[0] + g[0].x + clip[2] >= x + w && clip[1] + g[0].y + clip[3] >= y + h;
+      const bg = list.get_theme_node().get_background_color().alpha;
+      const dot = list.get_child_at_index(0)?.get_theme_node().get_background_color().to_string();
+      log(`wsswitcher: ${label} list=${[x, y, w, h].map(Math.round)} glasses=${g.length} opacity=${g[0]?.opacity} ` +
+        `clip=${clip.map(Math.round)} listbg=${bg} dot=${dot} ${inside && bg === 0 ? 'OK' : 'NG'}`);
+    };
+    const rect = [m.x + m.width / 2 - 300, m.y + m.height - 260, 600, 260];
+    for (const to of [1, 2, 3, 0]) {
+      show(to);
+      await sleep(250);
+      check(`switch to ${to}`);
+      await shot(`wsswitcher-${to}`, rect);
+    }
+    await sleep(1500);
+    log(`wsswitcher: after fade glasses=${glasses().length} popup=${!!Main.wm._workspaceSwitcherPopup} ` +
+      `${glasses().length === 0 ? 'OK' : 'NG'}`);
+    show(1);
+    await sleep(250);
+    settings.set_boolean('enable-workspace-switcher-glass', false);
+    await sleep(100);
+    const list = findActors(Main.layoutManager.uiGroup, a => a instanceof St.Widget && a.has_style_class_name('workspace-switcher'))[0];
+    const bg = list?.get_theme_node().get_background_color().alpha;
+    log(`wsswitcher: switched off while shown glasses=${glasses().length} listbg=${bg} ` +
+      `${glasses().length === 0 && bg > 0 ? 'OK' : 'NG'}`);
+    await shot('wsswitcher-off', rect);
+    settings.set_boolean('enable-workspace-switcher-glass', true);
+    await sleep(100);
+    check('switched on while shown');
+    await sleep(1500);
   }
 
   // Types queries into the launcher a key at a time and reports how long each takes to show its results, and
@@ -4113,6 +4172,8 @@ export default class LgDriver extends Extension {
     }
     if (parts.includes('workspaces'))
       await this._workspaces(settings, m);
+    if (parts.includes('wsswitcher'))
+      await this._workspaceSwitcher(settings, m);
     if (parts.includes('overviewitems'))
       await this._overviewItems(settings, m);
     if (parts.includes('launchertiming'))

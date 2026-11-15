@@ -9,6 +9,7 @@ import {DockWatcher} from './dist/dockManager.js';
 import {NotificationManager} from './dist/notificationManager.js';
 import {QuickSettingsManager} from './dist/quickSettingsManager.js';
 import {OsdManager} from './dist/osdManager.js';
+import {WorkspaceSwitcherGlass} from './dist/workspaceSwitcherGlass.js';
 import {ApplicationManager} from './dist/applicationManager.js';
 import {WindowListService} from './dist/windowListService.js';
 import {TopBarManager, ExtraTopBarManager} from './dist/topBarManager.js';
@@ -85,6 +86,9 @@ export default class LiquidGlassExtension extends Extension {
 
     this._osdManager = new OsdManager(path, this._settings, this._logger);
     this._osdManager.setup();
+
+    this._workspaceSwitcherGlass = new WorkspaceSwitcherGlass(path, this._settings, this._logger);
+    this._workspaceSwitcherGlass.setup();
 
     this._applicationManager = new ApplicationManager(path, this._settings, this._logger);
     this._applicationManager.setup();
@@ -167,6 +171,9 @@ export default class LiquidGlassExtension extends Extension {
 
     this._osdManager?.cleanup();
     this._osdManager = null;
+
+    this._workspaceSwitcherGlass?.cleanup();
+    this._workspaceSwitcherGlass = null;
 
     this._applicationManager?.cleanup();
     this._applicationManager = null;

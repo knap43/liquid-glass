@@ -13,3 +13,7 @@ declare module 'gi://Gst?version=1.0' {
   const Gst: any;
   export default Gst;
 }
+
+declare module 'resource:///org/gnome/shell/ui/workspaceSwitcherPopup.js' {
+  export const WorkspaceSwitcherPopup: any;
+}

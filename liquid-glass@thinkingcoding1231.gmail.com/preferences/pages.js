@@ -24,7 +24,7 @@ const ADAPTIVE_SURFACES = ['menu', 'panel-menu', 'notification', 'quick-settings
 
 const TEXT_KEYS = ADAPTIVE_SURFACES.map(surface => `${surface}-enable-adaptive-text-color`);
 const MENU_KEYS = ['enable-menu-glass', 'enable-quick-settings-glass', 'enable-extra-menu-glass', 'enable-desktop-menu-glass'];
-const POPUP_KEYS = ['enable-notification-glass', 'enable-osd-glass'];
+const POPUP_KEYS = ['enable-notification-glass', 'enable-osd-glass', 'enable-workspace-switcher-glass'];
 const MOTION_KEYS = ['menu', 'panel-menu', 'quick-settings'].map(surface => `enable-${surface}-animation`);
 const GROW_KEYS = ['menu', 'panel-menu'].map(surface => `${surface}-grow-from-button`);
 
@@ -873,6 +873,8 @@ function buildAdvancedPreferences(pages, controls) {
   controls.choice(effects, 'Top bar', TOP_BAR, 'The bar itself; menus have their own entries', false);
   for (const [surface, title, key, hint] of SURFACE_OPTIONS)
     if (key && surface !== 'application') controls.toggle(effects, title, key, hint ?? '');
+  controls.toggle(effects, 'Workspace switcher', 'enable-workspace-switcher-glass',
+    'The popup shown while switching workspaces, with the volume and brightness popups\' look');
   const groups = [selectorGroup, effects, addPanelMenus(pages.effects, controls),
     ...addRendering(pages.rendering, controls)];
   let visible = false;
@@ -957,7 +959,7 @@ export function buildPreferences(window, settings) {
   controls.toggle(surfaces, 'Dock', 'enable-dock-glass');
   controls.choice(surfaces, 'Menus', booleanChoices(MENU_KEYS), 'Calendar, quick settings, other top bar menus and desktop');
   controls.choice(surfaces, 'Apply quick settings glass to', QUICK_SETTINGS_GLASS, QUICK_SETTINGS_GLASS_HINT, false);
-  controls.choice(surfaces, 'Popups', booleanChoices(POPUP_KEYS), 'Notifications and volume / brightness indicators');
+  controls.choice(surfaces, 'Popups', booleanChoices(POPUP_KEYS), 'Notifications, volume / brightness indicators and the workspace switcher');
 
   const rendering = controls.group(advanced, 'Rendering');
   controls.choice(rendering, 'Quality', QUALITY);
