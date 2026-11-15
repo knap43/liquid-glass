@@ -167,6 +167,8 @@ export class ApplicationManager {
       connectSetting(this._profileKey(profile, 'content-opacity'), () => this._updateWindowOpacities());
     }
 
+    connectSetting('application-surface-light', () => this._updateSurfaceLight());
+
     connectSetting('application-glass-all-windows', () => this._syncWhitelist());
     connectSetting('application-window-whitelist', () => this._syncWhitelist());
     connectSetting('application-window-blacklist', () => this._syncWhitelist());
@@ -188,8 +190,29 @@ export class ApplicationManager {
   _updateWindowOpacities() {
     for (const state of this._states.values()) {
       if (isActorValid(state.surfaceActor))
-        state.contentKey.setOpacity(this._getContentOpacity(state.profile));
+        this._syncContentKey(state);
     }
+  }
+
+  // At full opacity the key would change nothing, and its offscreen copy
+  // resamples the window under fractional scaling, so it is turned off. A
+  // window that is translucent by itself then shows the glass exactly as drawn.
+  _syncContentKey(state: WindowState): void {
+    const opacity = this._getContentOpacity(state.profile);
+    const hidden = !this._glassOnMaximized && state.maximized;
+    state.contentKey.setOpacity(opacity);
+    state.contentKey.set_enabled(!hidden && opacity < 1);
+  }
+
+  // Rim, specular and sheen read as a bright frame around translucent content,
+  // but suit a window whose background is fully see-through. Desktop menus never get them.
+  _surfaceLightFor(profile: GlassProfile): boolean {
+    return profile === 'application' && this._settings.get_boolean('application-surface-light');
+  }
+
+  _updateSurfaceLight(): void {
+    for (const state of this._states.values())
+      state.glass.setSurfaceLightEnabled(this._surfaceLightFor(state.profile));
   }
 
   /** Appearance key in a profile's namespace, e.g. `desktop-menu-tint-color`. */
@@ -406,7 +429,6 @@ export class ApplicationManager {
       return;
 
     const contentKey = new ContentKey();
-    contentKey.setOpacity(this._getContentOpacity(profile));
     surfaceActor.add_effect_with_name('liquid-glass-content-key', contentKey);
 
     // Inside the window actor and below its surface: it moves, scales and
@@ -423,9 +445,7 @@ export class ApplicationManager {
     glass.setPadding(this._glassMargin);
     this._applyAppearance(glass, profile);
     glass.setIsDock(false);
-    // No rim, specular or sheen: around a window with translucent content
-    // they read as a bright frame. Only this window's glass is affected.
-    glass.setSurfaceLightEnabled(false);
+    glass.setSurfaceLightEnabled(this._surfaceLightFor(profile));
     // Windows draw their own circular corners, which the glass has to match.
     glass.setCornerSmoothingEnabled(false);
     glass.setShadowMaxRadius(Math.max(0, this._glassMargin - SHADOW_MARGIN_HEADROOM));
@@ -447,6 +467,7 @@ export class ApplicationManager {
       maximized,
     };
     this._states.set(windowActor, state);
+    this._syncContentKey(state);
 
     state.signals.push({
       obj: windowActor,
@@ -527,7 +548,7 @@ export class ApplicationManager {
       state.glass.setCornerRadius(shouldHideCorner ? 0 : this._settings.get_double('application-corner-radius'));
 
       if (isActorValid(state.surfaceActor)) {
-        state.contentKey.set_enabled(!shouldHideGlass);
+        this._syncContentKey(state);
 
         this._hideGlass(state);
       }

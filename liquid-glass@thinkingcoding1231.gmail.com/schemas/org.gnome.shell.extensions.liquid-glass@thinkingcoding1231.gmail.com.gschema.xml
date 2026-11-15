@@ -625,6 +625,11 @@
       <summary>Glass on maximized windows</summary>
       <description>Whether the glass effect should be applied to the window when it is maximized.</description>
     </key>
+    <key name="application-surface-light" type="b">
+      <default>false</default>
+      <summary>Rim and specular light on application windows</summary>
+      <description>Draws the rim, specular highlight and sheen on the glass behind application windows. Best with windows whose own background is fully transparent.</description>
+    </key>
     <key name="application-tint-color" type="s">
       <default>"#ffffff"</default>
       <summary>Tint color (Hex)</summary>

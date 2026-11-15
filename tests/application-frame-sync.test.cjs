@@ -79,7 +79,7 @@ test('cleanup disconnects the frame observer and every display handler', () => {
   assert.equal(display.handlers.size, 0);
 });
 
-function windowFixture() {
+function windowFixture({ contentOpacity = 0.85 } = {}) {
   const { loadModule } = require('./helpers/load-module.cjs');
   const handlers = () => ({
     handlers: new Map(), next: 1,
@@ -115,7 +115,16 @@ function windowFixture() {
     is_override_redirect: () => false, get_transient_for: () => null, get_wm_class: () => 'test',
     minimized: false,
   });
-  const surface = { opacity: 255 };
+  class ContentKey {
+    constructor() { Object.assign(this, { opacity: 1, enabled: true }); }
+    setOpacity(opacity) { this.opacity = opacity; }
+    set_enabled(enabled) { this.enabled = enabled; }
+  }
+  const surface = {
+    opacity: 255, effects: new Map(),
+    add_effect_with_name(name, effect) { this.effects.set(name, effect); },
+    remove_effect(effect) { for (const [n, e] of this.effects) if (e === effect) this.effects.delete(n); },
+  };
   const windowActor = Object.assign(handlers(), {
     x: 100, y: 60, translation_x: 0, translation_y: 0, scale_x: 1, scale_y: 1, mapped: true,
     get_stage: () => ({}), get_meta_window: () => metaWindow, get_first_child: () => surface,
@@ -125,7 +134,7 @@ function windowFixture() {
   });
   const settings = {
     get_boolean: key => key === 'enable-application-glass' || key === 'application-glass-all-windows',
-    get_strv: () => [], get_double: key => key === 'shadow-radius' ? 50 : key === 'shadow-intensity' ? 0.2 : 0.85,
+    get_strv: () => [], get_double: key => key === 'shadow-radius' ? 50 : key === 'shadow-intensity' ? 0.2 : contentOpacity,
     get_int: () => 10, get_string: () => '#ffffff', connect: () => 1, disconnect() {},
   };
   const writes = loadModule(path.join(__dirname,
@@ -137,7 +146,7 @@ function windowFixture() {
     GLib: { get_monotonic_time: () => 0, SOURCE_REMOVE: false },
     global: { stage: handlers(), display: handlers(), workspace_manager: { get_active_workspace: () => workspace },
       compositor: { get_laters: () => ({ add: () => 1, remove() {} }) } },
-    BackdropGlass: Glass, getWindowActors: () => [windowActor], isActorValid: a => !!a && !a.destroyed,
+    BackdropGlass: Glass, ContentKey, getWindowActors: () => [windowActor], isActorValid: a => !!a && !a.destroyed,
     getAllocatedSize: a => [a.get_allocation_box().get_width(), a.get_allocation_box().get_height()],
     setActorVisible(actor, visible) { actor.visible = visible; },
     ensureGlassAllocated() {}, ensureWindowActorAllocated: () => '',
@@ -190,17 +199,26 @@ test('moving or scaling the window marks the glass as moved without resizing it'
 test('a window on another workspace hides its glass, and cleanup restores the surface', () => {
   const { manager, glasses, windowActor, metaWindow, surface } = windowFixture();
   manager._setupWindow(windowActor);
-  assert.equal(surface.opacity, Math.round(0.85 * 255));
+  const key = surface.effects.get('liquid-glass-content-key');
+  assert.equal(key.opacity, 0.85);
+  assert.equal(key.enabled, true);
+  assert.equal(surface.opacity, 255, 'the surface itself is never faded');
   const state = manager._states.get(windowActor);
   metaWindow.get_workspace = () => ({});
   manager._syncState(state);
   assert.equal(glasses[0].visible, false);
   manager.cleanup();
-  assert.equal(surface.opacity, 255);
+  assert.equal(surface.effects.size, 0);
   assert.equal(glasses[0].cleaned, true);
   assert.equal(glasses[0].destroyed, true);
   assert.equal(windowActor.handlers.size, 0);
   assert.equal(metaWindow.handlers.size, 0);
+});
+
+test('full content opacity turns the content key off so the window is drawn as is', () => {
+  const { manager, windowActor, surface } = windowFixture({ contentOpacity: 1 });
+  manager._setupWindow(windowActor);
+  assert.equal(surface.effects.get('liquid-glass-content-key').enabled, false);
 });
 
 test('a window that moved this frame is not rescued as stranded, one that stayed put is', () => {
