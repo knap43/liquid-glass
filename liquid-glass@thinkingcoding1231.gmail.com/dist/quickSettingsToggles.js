@@ -37,8 +37,8 @@ export class ToggleStyles {
         this._isOpen = _isOpen;
     }
 
-    sync(root) {
-        const toggles = this._findAllToggleContainers(root);
+    sync(root, limit = Infinity) {
+        const toggles = this._findAllToggleContainers(root).slice(0, limit);
         this._ensureToggleStyles(toggles);
         return toggles;
     }

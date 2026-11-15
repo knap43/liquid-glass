@@ -20,6 +20,7 @@ import {
 import { MENU_NO_ANIMATION, accentColors } from './shellVersion.js';
 import { Logger } from './logger.js';
 import { BarGrowth, menuGrowthHost } from './barGrowth.js';
+import { MenuButtonGlass, ButtonStyles } from './menuButtonGlass.js';
 
 // Room around the glass rect for the shader's edge effects.
 const SHADER_PADDING = 20;
@@ -184,6 +185,7 @@ export class UIManager {
 
   // The menu's ancestor that is a direct child of uiGroup; see _restackGlass().
   private _menuRoot: Clutter.Actor | null = null;
+  private _buttonGlass: MenuButtonGlass | null = null;
 
   constructor(extensionPath: string, settings: Gio.Settings, logger: Logger,
     panelButton: any = Main.panel.statusArea.dateMenu, ownsAccentCss: boolean = true,
@@ -627,6 +629,10 @@ export class UIManager {
       else if (!enabled && this._isEffectActive) this._removeEffect();
     });
 
+    connectSetting('enable-menu-button-glass', () => {
+      if (this._isEffectActive) this._syncButtonGlass();
+    });
+
     const motionKeys = this._motionKey ? [this._motionKey] : [this._animationKey(), this._key('grow-from-button')];
     for (const key of motionKeys) connectSetting(key, () => this._readMotion());
 
@@ -827,6 +833,7 @@ export class UIManager {
     glass.setBlurRadius(blurRadius);
 
     glass.hide();
+    this._syncButtonGlass();
 
     // Follows the stage's frames while the menu is shown; an open menu that
     // does not change costs no frames.
@@ -1667,10 +1674,25 @@ export class UIManager {
 
     this._stopAdaptiveColorSampling();
     this._clearAdaptiveStyles();
+    this._buttonGlass?.destroy();
+    this._buttonGlass = null;
     this._disconnectEffectSources();
     this._barGrowth.release();
     this._restoreMenuActors();
     this._releaseGlass();
+  }
+
+  private _syncButtonGlass(): void {
+    const wanted = this._settings.get_boolean('enable-menu-button-glass');
+    if (wanted && !this._buttonGlass) {
+      this._buttonGlass = new MenuButtonGlass({
+        extensionPath: this.extensionPath, settings: this._settings, logger: this._logger,
+        owner: `${this._label}:buttons`, keyPrefix: this._keyPrefix, menu: this.menu, styles: new ButtonStyles(),
+      });
+    } else if (!wanted && this._buttonGlass) {
+      this._buttonGlass.destroy();
+      this._buttonGlass = null;
+    }
   }
 
   private _disconnectEffectSources() {

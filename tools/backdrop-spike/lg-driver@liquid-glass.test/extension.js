@@ -24,7 +24,7 @@
 //              ($LG_DRV_WALLPAPER); LG_DRV_FEATURES picks parts (comma
 //              separated: morph, topbar, widgets, clock, launcher; default all;
 //              also morphtrace, qssub, clockshot, clockdepth (the clock behind the wallpaper; needs the models), clockkeys (the arrow keys while the clock is edited), media, guides, launcherpointer,
-//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
+//              launchercolor, iconstyle, iconglass, workspaces, wsswitcher (the workspace switcher popup), buttonglass (menu buttons on their own glass), overviewitems, launchertiming, launcheropen, launcherenter, launcherenterkeys, fullshot, popupfreeze, redrawclip, prefshover, bannerintro, stalefreeze, dockgrow, nanrelay, notifstack (LG_DRV_LIGHT as for scale, LG_DRV_STACK notifications); fullshot to prefshover and the last three need LG_DTD_DIR; qsheight, the calendar matched
 //              to Quick Settings' height; qsflicker, the Quick Settings glass rect while adaptive colour samples;
 //              adaptiveoff, adaptive colour turned off and on while each surface is shown);
 //              also scale (the calendar, Quick Settings in both modes and the launcher
@@ -1677,6 +1677,73 @@ export default class LgDriver extends Extension {
     }
     St.Settings.get().slow_down_factor = 1;
     settings.set_boolean('desktop-items-first-workspace-only', false);
+  }
+
+  // Each menu's buttons on their own glass over the menu's: the regions, and the buttons' own backgrounds hidden.
+  async _buttonGlass(settings, m) {
+    const report = (label, owner, root) => {
+      const g = lg().glassObjects().find(x => x._owner === owner);
+      const d = g?.describe() ?? {};
+      const hidden = findActors(root, a => a instanceof St.Widget && (a.get_style() ?? '').includes('background-color: transparent !important'));
+      const bgs = hidden.map(a => a.get_theme_node().get_background_color().alpha);
+      log(`buttonglass: ${label} glass=${!!g} visible=${g?.visible} mapped=${g?.mapped} regions=${g?._renderer?.geometry?.regions?.length ?? '?'} ` +
+        `paints=${d.paints ?? '?'} copies=${d.copies ?? '?'} hidden=${hidden.length} bgs=[${bgs}] ` +
+        `${g?.mapped && hidden.length > 0 && bgs.every(a => a === 0) ? 'OK' : 'NG'}`);
+    };
+    const dateMenu = Main.panel.statusArea.dateMenu.menu;
+    dateMenu.open(false);
+    await sleep(1500);
+    report('calendar', 'menu:buttons', dateMenu.box);
+    await shot('buttonglass-calendar', [m.x + m.width / 2 - 450, m.y, 900, 700]);
+    dateMenu.close(false);
+    await sleep(800);
+
+    for (const mode of [0, 1]) {
+      settings.set_int('quick-settings-apply-to', mode);
+      await sleep(500);
+      const qs = Main.panel.statusArea.quickSettings.menu;
+      qs.open(false);
+      await sleep(1500);
+      report(`quick settings mode=${mode}`, mode ? 'quick-settings-toggles' : 'quick-settings:buttons', qs.box);
+      await shot(`buttonglass-qs-${mode}`, [m.x + m.width - 700, m.y, 700, 700]);
+      qs.close(false);
+      await sleep(800);
+    }
+    settings.set_int('quick-settings-apply-to', 0);
+
+    // A row of the desktop menu's kind: the volume menu's rows highlighted by hand.
+    const panelMenus = Object.values(Main.panel.statusArea).filter(b => b?.menu?.box && b !== Main.panel.statusArea.dateMenu &&
+      b !== Main.panel.statusArea.quickSettings && b.menu.numMenuItems > 0);
+    const button = panelMenus[0];
+    if (button) {
+      settings.set_boolean('enable-extra-menu-glass', true);
+      await sleep(1000);
+      button.menu.open(false);
+      await sleep(1000);
+      const item = button.menu._getMenuItems().find(i => i.actor?.visible);
+      item?.actor.add_style_pseudo_class('selected');
+      await sleep(500);
+      report(`panel menu ${button.constructor.name} selected row`,
+        lg().glassObjects().find(x => x.get_parent()?.get_parent() === button.menu.box)?._owner, button.menu.box);
+      await shot('buttonglass-panelmenu', [m.x, m.y, m.width, 600]);
+      item?.actor.remove_style_pseudo_class('selected');
+      button.menu.close(false);
+      await sleep(500);
+    } else {
+      log('buttonglass: no other panel menu');
+    }
+
+    settings.set_boolean('enable-menu-button-glass', false);
+    await sleep(300);
+    dateMenu.open(false);
+    await sleep(1000);
+    const left = findActors(dateMenu.box, a => a instanceof St.Widget && (a.get_style() ?? '').includes('background-color: transparent !important'));
+    log(`buttonglass: switched off glass=${lg().glassObjects().filter(x => x._owner === 'menu:buttons').length} overrides=${left.length} ` +
+      `${left.length === 0 ? 'OK' : 'NG'}`);
+    await shot('buttonglass-calendar-off', [m.x + m.width / 2 - 450, m.y, 900, 700]);
+    dateMenu.close(false);
+    settings.set_boolean('enable-menu-button-glass', true);
+    await sleep(500);
   }
 
   // The popup shown while switching workspaces, made the way the window manager makes it: its glass sits under
@@ -4174,6 +4241,8 @@ export default class LgDriver extends Extension {
       await this._workspaces(settings, m);
     if (parts.includes('wsswitcher'))
       await this._workspaceSwitcher(settings, m);
+    if (parts.includes('buttonglass'))
+      await this._buttonGlass(settings, m);
     if (parts.includes('overviewitems'))
       await this._overviewItems(settings, m);
     if (parts.includes('launchertiming'))

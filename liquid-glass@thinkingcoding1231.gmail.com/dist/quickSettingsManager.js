@@ -11,6 +11,7 @@ import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference }
 import { LayoutOpaqueActor, ensureGlassAllocated, isActorValid, resolveMonitorGeometry, getAllocatedSize, getTransformedRect, placeScreenGlass, resolveGlassOrigin, applyGlassScale, GLASS_SHADOW_MAX_RADIUS, setPositionIfChanged, setScaleIfChanged } from './actors.js';
 import { MENU_NO_ANIMATION } from './shellVersion.js';
 import { BarGrowth, menuGrowthHost } from './barGrowth.js';
+import { MenuButtonGlass } from './menuButtonGlass.js';
 // Room around the glass rect for the shader's edge effects.
 const SHADER_PADDING = 20;
 const SAMPLE_PER_ELEMENT = false;
@@ -104,6 +105,8 @@ export class QuickSettingsManager {
     // LayoutOpaqueActor).
     _menuRoot = null;
     _toggleGlassHost = null;
+    // Background mode: the toggles' own glass over the panel's.
+    _buttonGlass = null;
     _lastScreenW;
     _lastScreenH;
     _isEffectActive;
@@ -305,6 +308,10 @@ export class QuickSettingsManager {
         connectSetting(this._animationKey(), () => {
             this._enableAnimation = this._settings.get_boolean(this._animationKey());
         });
+        connectSetting('enable-menu-button-glass', () => {
+            if (this._isEffectActive && this._activeMode === 'background')
+                this._syncButtonGlass();
+        });
         connectSetting(this._key('toggle-animation'), () => {
             this._toggleAnimation = this._settings.get_boolean(this._key('toggle-animation'));
         });
@@ -496,6 +503,7 @@ export class QuickSettingsManager {
         glass.setContrast(contrast);
         glass.setBlurRadius(blurRadius);
         glass.hide();
+        this._syncButtonGlass();
         const startFrameSync = () => this._startFrameSync(() => this._syncGeometry(), 'QuickSettingsManager', true);
         const stopFrameSync = () => this._stopFrameSync();
         this._signals = [];
@@ -510,7 +518,9 @@ export class QuickSettingsManager {
                 startFrameSync();
                 // The first colors of an open are applied without a tween.
                 this._startAdaptiveColorSampling(true);
-                this._startButtonAlphaSampling();
+                // With their own glass the buttons are not dimmed: their backgrounds are already hidden.
+                if (!this._buttonGlass)
+                    this._startButtonAlphaSampling();
                 this._startAnimation(1);
                 return;
             }
@@ -541,6 +551,24 @@ export class QuickSettingsManager {
         this._updateResolution();
         if (this.targetActor.mapped) {
             startFrameSync();
+        }
+    }
+
+    _syncButtonGlass() {
+        const wanted = this._settings.get_boolean('enable-menu-button-glass');
+        if (wanted && !this._buttonGlass) {
+            this._clearButtonStyles();
+            this._buttonGlass = new MenuButtonGlass({
+                extensionPath: this.extensionPath, settings: this._settings, logger: this._logger,
+                owner: 'quick-settings:buttons', keyPrefix: this._keyPrefix, menu: this.menu, styles: this._toggleStyles,
+                radius: () => this._settings.get_double('quick-settings-toggle-corner-radius'),
+            });
+        }
+        else if (!wanted && this._buttonGlass) {
+            this._buttonGlass.destroy();
+            this._buttonGlass = null;
+            if (this.menu?.isOpen)
+                this._startButtonAlphaSampling();
         }
     }
 
@@ -1872,6 +1900,8 @@ export class QuickSettingsManager {
         this._stopAdaptiveColorSampling();
         this._clearAdaptiveStyles();
         this._clearButtonStyles();
+        this._buttonGlass?.destroy();
+        this._buttonGlass = null;
         this._clearSubmenuFix();
         this._endIntro();
         this._toggleStyles.clear();

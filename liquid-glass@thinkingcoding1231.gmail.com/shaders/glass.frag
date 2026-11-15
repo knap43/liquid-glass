@@ -123,7 +123,7 @@ uniform float grow_w[MAX_GLASS_GROWTHS];
 uniform float grow_h[MAX_GLASS_GROWTHS];
 uniform float grow_r[MAX_GLASS_GROWTHS * 4];
 
-// Multi-region mode, for Quick Settings' toggle-button glass: up to
+// Multi-region mode, for the glass of menu buttons and Quick Settings' toggles: up to
 // MAX_GLASS_REGIONS separate rounded rects drawn from the same blurred
 // texture. The regions must not overlap, and they get no drop shadow.
 #define MAX_GLASS_REGIONS 16
@@ -139,6 +139,8 @@ uniform float region_tint_b[MAX_GLASS_REGIONS];
 // Strength of each region's own colour, separate from tint_strength so the
 // two tints stay independent. 0 when the colour could not be resolved.
 uniform float region_base_strength[MAX_GLASS_REGIONS];
+// Each region's corner radius; below 0 it takes corner_radius.
+uniform float region_radius[MAX_GLASS_REGIONS];
 
 #ifdef LG_SHAPE_TEXTURE
 // The outline as distance fields over the dock_* rect, for glass text: the
@@ -333,12 +335,13 @@ float sdGlassPick(vec2 p, vec2 b, float r) {
 // The region this pixel is most inside of, with its local frame and colours.
 // Far outside every region the local position stays large, which main()
 // already treats as transparent.
-void findActiveRegion(vec2 pixel_coord, float pad, out vec2 outLocalPos, out vec2 outBoxSize, out vec3 outTint, out float outBaseStrength) {
+void findActiveRegion(vec2 pixel_coord, float pad, out vec2 outLocalPos, out vec2 outBoxSize, out vec3 outTint, out float outBaseStrength, out float outRadius) {
     float bestD = 1.0e6;
     outLocalPos = vec2(1.0e6);
     outBoxSize = vec2(1.0);
     outTint = vec3(1.0);
     outBaseStrength = 0.0;
+    outRadius = corner_radius;
 
     int count = int(min(region_count, float(MAX_GLASS_REGIONS)));
 
@@ -355,13 +358,15 @@ void findActiveRegion(vec2 pixel_coord, float pad, out vec2 outLocalPos, out vec
 
         // Picking the region needs no continuous corners; main() measures the
         // chosen one with them.
-        float d = sdGlassPick(rLocal, rBox, corner_radius);
+        float r = region_radius[i] < 0.0 ? corner_radius : region_radius[i];
+        float d = sdGlassPick(rLocal, rBox, r);
         if (d < bestD) {
             bestD = d;
             outLocalPos = rLocal;
             outBoxSize = rBox;
             outTint = vec3(region_tint_r[i], region_tint_g[i], region_tint_b[i]);
             outBaseStrength = region_base_strength[i];
+            outRadius = r;
         }
     }
 }
@@ -785,9 +790,10 @@ void main() {
     vec3 activeTint;
     // The element's own colour strength; 0 outside multi-region mode.
     float activeBaseStrength = 0.0;
+    float activeRadius = corner_radius;
 
     if (multi_region_mode > 0.5) {
-        findActiveRegion(pixel_coord, padding, local_pos, box_size, activeTint, activeBaseStrength);
+        findActiveRegion(pixel_coord, padding, local_pos, box_size, activeTint, activeBaseStrength, activeRadius);
     } else {
         // The actor can be much larger than the glass (a monitor-sized
         // capture), so the shape comes from dock_*, not from the resolution.
@@ -806,7 +812,7 @@ void main() {
         activeTint = vec3(tint_r, tint_g, tint_b);
     }
 
-    vec2 corner = cornerShape(box_size, corner_radius);
+    vec2 corner = cornerShape(box_size, activeRadius);
     frame_origin = pixel_coord - local_pos;
     float d = sdGlass(local_pos, box_size, corner);
 

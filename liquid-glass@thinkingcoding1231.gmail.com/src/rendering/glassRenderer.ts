@@ -15,6 +15,8 @@ export interface GlassRegion {
   x: number; y: number; w: number; h: number;
   tintR: number; tintG: number; tintB: number;
   baseStrength?: number;
+  // The region's own corner radius; corner_radius when left out.
+  radius?: number;
 }
 
 /** The screen edge a glass grows out of; glass.frag's attach_edge is the index. */
@@ -345,6 +347,7 @@ export class GlassRenderer {
     const rTintG = new Array(MAX_GLASS_REGIONS).fill(1.0);
     const rTintB = new Array(MAX_GLASS_REGIONS).fill(1.0);
     const rBaseStrength = new Array(MAX_GLASS_REGIONS).fill(0.0);
+    const rRadius = new Array(MAX_GLASS_REGIONS).fill(-1.0);
 
     clamped.forEach((region, i) => {
       rx[i] = region.x;
@@ -355,6 +358,7 @@ export class GlassRenderer {
       rTintG[i] = region.tintG;
       rTintB[i] = region.tintB;
       rBaseStrength[i] = Math.max(0.0, Math.min(1.0, region.baseStrength ?? 0.0));
+      rRadius[i] = region.radius ?? -1.0;
     });
 
     this.geometry.regions = clamped.map(r => [r.x, r.y, r.w, r.h]);
@@ -368,6 +372,7 @@ export class GlassRenderer {
     this.uniforms.setArray('region_tint_g', rTintG);
     this.uniforms.setArray('region_tint_b', rTintB);
     this.uniforms.setArray('region_base_strength', rBaseStrength);
+    this.uniforms.setArray('region_radius', rRadius);
     this._repaintIfDirty();
   }
 

@@ -11,6 +11,7 @@ import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference }
 import { UnpickableWidget, ensureGlassAllocated, resolveMonitorGeometry, getAllocatedSize, isActorValid, placeScreenGlass, resolveGlassOrigin, applyGlassScale, GLASS_SHADOW_MAX_RADIUS } from './actors.js';
 import { MENU_NO_ANIMATION, accentColors } from './shellVersion.js';
 import { BarGrowth, menuGrowthHost } from './barGrowth.js';
+import { MenuButtonGlass, ButtonStyles } from './menuButtonGlass.js';
 // Room around the glass rect for the shader's edge effects.
 const SHADER_PADDING = 20;
 const SAMPLE_PER_ELEMENT = false;
@@ -139,6 +140,7 @@ export class UIManager {
     _lastScreenH;
     // The menu's ancestor that is a direct child of uiGroup; see _restackGlass().
     _menuRoot = null;
+    _buttonGlass = null;
 
     constructor(extensionPath, settings, logger, panelButton = Main.panel.statusArea.dateMenu, ownsAccentCss = true, _enableKey = 'enable-menu-glass',
     // Settings prefix: `menu` for the calendar, `panel-menu` for the
@@ -552,6 +554,10 @@ export class UIManager {
             else if (!enabled && this._isEffectActive)
                 this._removeEffect();
         });
+        connectSetting('enable-menu-button-glass', () => {
+            if (this._isEffectActive)
+                this._syncButtonGlass();
+        });
         const motionKeys = this._motionKey ? [this._motionKey] : [this._animationKey(), this._key('grow-from-button')];
         for (const key of motionKeys)
             connectSetting(key, () => this._readMotion());
@@ -728,6 +734,7 @@ export class UIManager {
         glass.setSaturation(saturation);
         glass.setBlurRadius(blurRadius);
         glass.hide();
+        this._syncButtonGlass();
         // Follows the stage's frames while the menu is shown; an open menu that
         // does not change costs no frames.
         const stopFrameSync = () => stopStageLoop(this._frameSignalSlot, this._frameSlot);
@@ -1566,10 +1573,26 @@ export class UIManager {
         this._isEffectActive = false;
         this._stopAdaptiveColorSampling();
         this._clearAdaptiveStyles();
+        this._buttonGlass?.destroy();
+        this._buttonGlass = null;
         this._disconnectEffectSources();
         this._barGrowth.release();
         this._restoreMenuActors();
         this._releaseGlass();
+    }
+
+    _syncButtonGlass() {
+        const wanted = this._settings.get_boolean('enable-menu-button-glass');
+        if (wanted && !this._buttonGlass) {
+            this._buttonGlass = new MenuButtonGlass({
+                extensionPath: this.extensionPath, settings: this._settings, logger: this._logger,
+                owner: `${this._label}:buttons`, keyPrefix: this._keyPrefix, menu: this.menu, styles: new ButtonStyles(),
+            });
+        }
+        else if (!wanted && this._buttonGlass) {
+            this._buttonGlass.destroy();
+            this._buttonGlass = null;
+        }
     }
 
     _disconnectEffectSources() {

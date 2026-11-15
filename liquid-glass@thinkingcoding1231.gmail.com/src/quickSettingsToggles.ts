@@ -52,8 +52,8 @@ function _releaseEntry(pod: Clutter.Actor, entry: ToggleEntry): void {
 export class ToggleStyles {
   constructor(private _logger: Logger, private _isOpen: () => boolean) { }
 
-  sync(root: Clutter.Actor): Clutter.Actor[] {
-    const toggles = this._findAllToggleContainers(root);
+  sync(root: Clutter.Actor, limit: number = Infinity): Clutter.Actor[] {
+    const toggles = this._findAllToggleContainers(root).slice(0, limit);
     this._ensureToggleStyles(toggles);
     return toggles;
   }

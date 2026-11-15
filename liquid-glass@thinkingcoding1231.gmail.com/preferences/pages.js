@@ -873,6 +873,8 @@ function buildAdvancedPreferences(pages, controls) {
   controls.choice(effects, 'Top bar', TOP_BAR, 'The bar itself; menus have their own entries', false);
   for (const [surface, title, key, hint] of SURFACE_OPTIONS)
     if (key && surface !== 'application') controls.toggle(effects, title, key, hint ?? '');
+  controls.toggle(effects, 'Glass buttons in menus', 'enable-menu-button-glass',
+    'Buttons, cards and highlighted rows get their own glass over the menu\'s');
   controls.toggle(effects, 'Workspace switcher', 'enable-workspace-switcher-glass',
     'The popup shown while switching workspaces, with the volume and brightness popups\' look');
   const groups = [selectorGroup, effects, addPanelMenus(pages.effects, controls),

@@ -538,6 +538,11 @@
       <description>Corner radius applied to each individual toggle's glass shape. Only used when quick-settings-apply-to is Toggles.</description>
     </key>
 
+    <key name="enable-menu-button-glass" type="b">
+      <default>true</default>
+      <summary>Glass buttons in menus</summary>
+      <description>The buttons and highlighted rows of menus with glass get their own piece of glass over the menu's: Quick Settings' toggles (in whole-menu mode), the calendar's cards and the other menus' rows.</description>
+    </key>
     <key name="enable-osd-glass" type="b">
       <default>true</default>
       <summary>Enable glass effect for OSD</summary>
