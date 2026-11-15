@@ -649,7 +649,7 @@
     <key name="application-content-opacity" type="d">
       <default>0.85</default>
       <summary>Window content opacity</summary>
-      <description>How much of the window's own background colour stays over the glass (0.0 to 1.0). Text and other detail stay opaque; 0.0 shows only the glass, 1.0 leaves the window untouched.</description>
+      <description>Opacity of the window's flat background areas, letting the glass effect show through while text and other detail stay opaque (0.0 to 1.0).</description>
     </key>
     <key name="application-brightness" type="d">
       <default>1.0</default>

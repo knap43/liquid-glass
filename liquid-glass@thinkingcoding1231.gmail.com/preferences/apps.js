@@ -430,7 +430,7 @@ export class WindowRules {
     const group = this.controls.group(page, 'Application windows');
     this.controls.toggle(group, 'Window glass', 'enable-application-glass');
     const allRow = this.controls.toggle(group, 'Include all applications', 'application-glass-all-windows');
-    const opacityRow = this.controls.number(group, 'Background opacity', ['application-content-opacity'], 0, 1, 0.05);
+    const opacityRow = this.controls.number(group, 'Content opacity', ['application-content-opacity'], 0, 1, 0.05);
     const cornerRow = this.controls.toggle(group, 'Corner on maximized windows', 'application-corner-on-maximized');
     const glassRow = this.controls.toggle(group, 'Glass on maximized windows', 'application-glass-on-maximized');
     const lightRow = this.controls.toggle(group, 'Rim and specular light', 'application-surface-light');
